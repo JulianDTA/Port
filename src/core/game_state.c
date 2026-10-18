@@ -124,27 +124,138 @@ bool game_play_selected_hand(GameSession* game) {
     // 1. Evaluate Poker Hand
     game->last_eval = poker_evaluate_played(selected, count, game->hand_levels);
 
-    // 2. Initialize Score State
+    // 2. Initialize Score State to base chips and mult
     score_state_init(&game->last_score, game->last_eval.initial_chips, (double)game->last_eval.initial_mult);
 
-    // Round context
-    RoundContext ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.remaining_discards = game->discards_left;
-    ctx.remaining_hands = game->hands_left;
-    ctx.current_dollars = game->dollars;
-    ctx.cards_remaining_in_deck = game->deck.draw_pile.count;
-    ctx.jokers_count = game->joker_count;
-    ctx.max_joker_slots = MAX_JOKERS_SLOTS;
+    // Enter scoring state
+    game->current_state = STATE_ROUND_SCORING;
+    game->scoring_step = 0;
+    game->scoring_timer = 0;
+    return true;
+}
 
-    // 3. Score played cards
-    for (int i = 0; i < game->last_eval.scoring_count; ++i) {
+void game_tick_scoring(GameSession* game) {
+    if (!game || game->current_state != STATE_ROUND_SCORING) return;
+
+    game->scoring_timer++;
+
+    // Step 0: Hand announcement delay (10 frames)
+    if (game->scoring_step == 0) {
+        if (game->scoring_timer >= 10) {
+            game->scoring_step = 1;
+            game->scoring_timer = 0;
+        }
+        return;
+    }
+
+    // Steps 1..scoring_count: Score each played card in sequence
+    if (game->scoring_step >= 1 && game->scoring_step <= game->last_eval.scoring_count) {
+        int c_idx = game->scoring_step - 1;
+        if (game->scoring_timer == 1) {
+            const Card* c = game->last_eval.scoring_cards[c_idx];
+            bool debuffed = (game->current_blind == BLIND_BOSS) && boss_blind_is_card_debuffed(game->current_boss, c);
+
+            if (!debuffed) {
+                score_state_add_chips(&game->last_score, card_get_base_chips(c));
+                if (c->enhancement == ENHANCEMENT_BONUS) score_state_add_chips(&game->last_score, 30);
+                else if (c->enhancement == ENHANCEMENT_MULT) score_state_add_mult(&game->last_score, 4.0);
+                else if (c->enhancement == ENHANCEMENT_GLASS) score_state_multiply_mult(&game->last_score, 2.0);
+
+                if (c->edition == EDITION_FOIL) score_state_add_chips(&game->last_score, 50);
+                else if (c->edition == EDITION_HOLOGRAPHIC) score_state_add_mult(&game->last_score, 10.0);
+                else if (c->edition == EDITION_POLYCHROME) score_state_multiply_mult(&game->last_score, 1.5);
+
+                if (c->seal == SEAL_GOLD) game->dollars += 3;
+
+                joker_trigger_card_scored(game->jokers, game->joker_count, c, &game->last_score);
+            }
+        }
+        if (game->scoring_timer >= 8) {
+            game->scoring_step++;
+            game->scoring_timer = 0;
+        }
+        return;
+    }
+
+    // Step scoring_count + 1: Held in hand triggers (Steel cards, Jokers)
+    int step_held = game->last_eval.scoring_count + 1;
+    if (game->scoring_step == step_held) {
+        if (game->scoring_timer == 1) {
+            for (int i = 0; i < game->deck.hand.count; ++i) {
+                if (!game->deck.hand.cards[i].is_selected) {
+                    const Card* c = &game->deck.hand.cards[i];
+                    if (c->enhancement == ENHANCEMENT_STEEL) {
+                        score_state_multiply_mult(&game->last_score, 1.5);
+                    }
+                    joker_trigger_held_in_hand(game->jokers, game->joker_count, c, &game->last_score);
+                }
+            }
+        }
+        if (game->scoring_timer >= 8) {
+            game->scoring_step++;
+            game->scoring_timer = 0;
+        }
+        return;
+    }
+
+    // Step scoring_count + 2: Jokers independent evaluation
+    int step_jokers = game->last_eval.scoring_count + 2;
+    if (game->scoring_step == step_jokers) {
+        if (game->scoring_timer == 1) {
+            RoundContext ctx;
+            memset(&ctx, 0, sizeof(ctx));
+            ctx.remaining_discards = game->discards_left;
+            ctx.remaining_hands = game->hands_left;
+            ctx.current_dollars = game->dollars;
+            ctx.cards_remaining_in_deck = game->deck.draw_pile.count;
+            ctx.jokers_count = game->joker_count;
+            ctx.max_joker_slots = MAX_JOKERS_SLOTS;
+
+            const Card* selected[5];
+            int count = deck_get_selected_cards(&game->deck, selected);
+            joker_trigger_hand_evaluated(game->jokers, game->joker_count, game->last_eval.type, count, &ctx, &game->last_score);
+        }
+        if (game->scoring_timer >= 10) {
+            game->scoring_step++;
+            game->scoring_timer = 0;
+        }
+        return;
+    }
+
+    // Step scoring_count + 3: Slam Chips x Mult into Round Score
+    int step_slam = game->last_eval.scoring_count + 3;
+    if (game->scoring_step == step_slam) {
+        if (game->scoring_timer == 1) {
+            int64_t hand_points = score_state_calculate_final(&game->last_score);
+            game->current_round_score += hand_points;
+        }
+        if (game->scoring_timer >= 14) {
+            game->scoring_step++;
+            game->scoring_timer = 0;
+        }
+        return;
+    }
+
+    // Step scoring_count + 4: Conclude Hand & transition state
+    int step_finish = game->last_eval.scoring_count + 4;
+    if (game->scoring_step >= step_finish) {
+        game_finish_scoring(game);
+    }
+}
+
+void game_finish_scoring(GameSession* game) {
+    if (!game || game->current_state != STATE_ROUND_SCORING) return;
+
+    // Fast-forward any remaining card scoring
+    int start_c = (game->scoring_step >= 1) ? (game->scoring_step - 1) : 0;
+    if (game->scoring_timer == 0) start_c = (game->scoring_step >= 1) ? game->scoring_step : 0;
+
+    for (int i = start_c; i < game->last_eval.scoring_count; ++i) {
         const Card* c = game->last_eval.scoring_cards[i];
         bool debuffed = (game->current_blind == BLIND_BOSS) && boss_blind_is_card_debuffed(game->current_boss, c);
 
         if (!debuffed) {
             score_state_add_chips(&game->last_score, card_get_base_chips(c));
-
             if (c->enhancement == ENHANCEMENT_BONUS) score_state_add_chips(&game->last_score, 30);
             else if (c->enhancement == ENHANCEMENT_MULT) score_state_add_mult(&game->last_score, 4.0);
             else if (c->enhancement == ENHANCEMENT_GLASS) score_state_multiply_mult(&game->last_score, 2.0);
@@ -159,51 +270,70 @@ bool game_play_selected_hand(GameSession* game) {
         }
     }
 
-    // 4. Cards held in hand
-    for (int i = 0; i < game->deck.hand.count; ++i) {
-        if (!game->deck.hand.cards[i].is_selected) {
-            const Card* c = &game->deck.hand.cards[i];
-            if (c->enhancement == ENHANCEMENT_STEEL) {
-                score_state_multiply_mult(&game->last_score, 1.5);
+    int step_held = game->last_eval.scoring_count + 1;
+    if (game->scoring_step < step_held || (game->scoring_step == step_held && game->scoring_timer == 0)) {
+        for (int i = 0; i < game->deck.hand.count; ++i) {
+            if (!game->deck.hand.cards[i].is_selected) {
+                const Card* c = &game->deck.hand.cards[i];
+                if (c->enhancement == ENHANCEMENT_STEEL) {
+                    score_state_multiply_mult(&game->last_score, 1.5);
+                }
+                joker_trigger_held_in_hand(game->jokers, game->joker_count, c, &game->last_score);
             }
-            joker_trigger_held_in_hand(game->jokers, game->joker_count, c, &game->last_score);
         }
     }
 
-    // 5. Jokers independent evaluation
-    joker_trigger_hand_evaluated(game->jokers, game->joker_count, game->last_eval.type, count, &ctx, &game->last_score);
+    int step_jokers = game->last_eval.scoring_count + 2;
+    if (game->scoring_step < step_jokers || (game->scoring_step == step_jokers && game->scoring_timer == 0)) {
+        RoundContext ctx;
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.remaining_discards = game->discards_left;
+        ctx.remaining_hands = game->hands_left;
+        ctx.current_dollars = game->dollars;
+        ctx.cards_remaining_in_deck = game->deck.draw_pile.count;
+        ctx.jokers_count = game->joker_count;
+        ctx.max_joker_slots = MAX_JOKERS_SLOTS;
 
-    // 6. Calculate total score
-    int64_t hand_points = score_state_calculate_final(&game->last_score);
-    game->current_round_score += hand_points;
+        const Card* selected[5];
+        int count = deck_get_selected_cards(&game->deck, selected);
+        joker_trigger_hand_evaluated(game->jokers, game->joker_count, game->last_eval.type, count, &ctx, &game->last_score);
+    }
+
+    int step_slam = game->last_eval.scoring_count + 3;
+    if (game->scoring_step < step_slam || (game->scoring_step == step_slam && game->scoring_timer == 0)) {
+        int64_t hand_points = score_state_calculate_final(&game->last_score);
+        game->current_round_score += hand_points;
+    }
 
     // Trigger after-hand effects
+    RoundContext ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.remaining_discards = game->discards_left;
+    ctx.remaining_hands = game->hands_left;
+    ctx.current_dollars = game->dollars;
+    ctx.cards_remaining_in_deck = game->deck.draw_pile.count;
+    ctx.jokers_count = game->joker_count;
+    ctx.max_joker_slots = MAX_JOKERS_SLOTS;
     joker_trigger_hand_played(game->jokers, game->joker_count, &ctx);
 
-    // Boss effect: The Arm decreases hand level
     if (game->current_blind == BLIND_BOSS && game->current_boss == BOSS_THE_ARM) {
         if (game->hand_levels[game->last_eval.type] > 1) {
             game->hand_levels[game->last_eval.type]--;
         }
     }
-
-    // Boss effect: The Hook discards 2 random cards
     if (game->current_blind == BLIND_BOSS && game->current_boss == BOSS_THE_HOOK) {
         if (game->deck.hand.count > 2) {
-            deck_draw_card(&game->deck); // simulate discard
+            deck_draw_card(&game->deck);
         }
     }
 
-    // Cleanup played hand & decrement hands left
     deck_remove_selected_from_hand(&game->deck);
     game->hands_left--;
 
-    // 7. Check victory or defeat conditions
     if (game->current_round_score >= game->target_score) {
         game->current_state = STATE_ROUND_VICTORY;
         int base_reward = (game->current_blind == BLIND_SMALL) ? 3 : (game->current_blind == BLIND_BIG ? 4 : 5);
         int bonus_hands = game->hands_left;
-        // Interest: $1 per $5, max $5
         int interest = game->dollars / 5;
         if (interest > 5) interest = 5;
 
@@ -215,10 +345,10 @@ bool game_play_selected_hand(GameSession* game) {
         game->current_state = STATE_GAME_OVER;
     } else {
         deck_draw_up_to_limit(&game->deck);
+        game->current_state = STATE_ROUND_ACTIVE;
     }
 
     game_update_selection_preview(game);
-    return true;
 }
 
 bool game_discard_selected_cards(GameSession* game) {

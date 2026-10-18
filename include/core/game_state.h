@@ -86,5 +86,7 @@ void game_advance_to_shop(GameSession* game);
 void game_advance_next_blind(GameSession* game);
 bool game_sell_joker(GameSession* game, int joker_index);
 bool game_sell_consumable(GameSession* game, int consumable_index);
+void game_tick_scoring(GameSession* game);
+void game_finish_scoring(GameSession* game);
 
 #endif // GAME_STATE_H

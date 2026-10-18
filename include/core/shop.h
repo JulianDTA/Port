@@ -56,6 +56,7 @@ typedef struct {
     PackType active_pack;
     int pack_choice_count;
     ShopSlot pack_cards[3]; // The 3 cards revealed inside the pack
+    bool show_inventory;    // When true, displays inventory sell screen
 } ShopState;
 
 void shop_generate(ShopState* shop, uint32_t seed, int ante);
