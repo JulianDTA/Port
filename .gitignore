@@ -1,0 +1,25 @@
+# Extracted game assets (copyrighted, not for redistribution)
+extracted/
+
+# Build artifacts
+build_ds/
+*.exe
+*.obj
+*.o
+*.elf
+*.nds
+*.d
+
+# Generated graphics headers (rebuild with tools/asset_pipeline.py)
+include/gfx/*.h
+
+# IDE
+.vscode/
+*.suo
+*.sln
+*.vcxproj*
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
