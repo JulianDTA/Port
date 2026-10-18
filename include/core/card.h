@@ -75,4 +75,9 @@ int32_t card_get_base_chips(const Card* card);
 const char* card_suit_name(CardSuit suit);
 const char* card_rank_name(CardRank rank);
 
+static inline bool card_is_face(const Card* card) {
+    if (!card) return false;
+    return (card->rank == RANK_JACK || card->rank == RANK_QUEEN || card->rank == RANK_KING);
+}
+
 #endif // CARD_H

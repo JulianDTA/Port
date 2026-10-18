@@ -74,6 +74,7 @@ struct Joker {
     const char* name;
     JokerRarity rarity;
     int32_t cost;
+    int32_t sell_value;
     CardEdition edition;
     bool is_debuffed;
     int32_t custom_counter; // For stacking jokers (e.g. Ice Cream, Popcorn)

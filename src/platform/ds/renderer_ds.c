@@ -1,6 +1,8 @@
 #include "platform/renderer_ds.h"
 #include "gfx/balatro_deck_gfx.h"
 #include "gfx/balatro_chips_gfx.h"
+#include "gfx/balatro_consumables_gfx.h"
+#include "gfx/balatro_jokers_gfx.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -206,7 +208,7 @@ void draw_string_2x(uint16_t* fb, int x, int y, const char* str, uint16_t text_c
     int cur_x = x;
     while (*str) {
         draw_char_2x(fb, cur_x, y, *str, text_col);
-        cur_x += 12; // 10 pixels + 2 pixels spacing
+        cur_x += 12;
         str++;
     }
 }
@@ -217,10 +219,10 @@ void draw_string_2x_shadow(uint16_t* fb, int x, int y, const char* str, uint16_t
 }
 
 // -------------------------------------------------------------
-// Card Rendering (Authentic Balatro 8-Bit Pixel Art Playing Card)
+// Card & Sprite Blitting Helpers
 // -------------------------------------------------------------
 
-static void draw_playing_card(uint16_t* fb, int x, int y, const Card* card) {
+void renderer_draw_card_sprite(uint16_t* fb, int x, int y, const Card* card, bool debuffed) {
     // Drop shadow
     draw_fill_rect(fb, x + 2, y + 2, BALATRO_CARD_W, BALATRO_CARD_H, COLOR_CARD_SHADOW);
 
@@ -236,7 +238,6 @@ static void draw_playing_card(uint16_t* fb, int x, int y, const Card* card) {
     int sprite_idx = suit_row * 13 + col;
     const uint16_t* sprite = s_balatro_cards[sprite_idx];
 
-    // Blit authentic Balatro card sprite
     for (int py = 0; py < BALATRO_CARD_H; ++py) {
         int sy = y + py;
         if (sy < 0 || sy >= DS_SCREEN_H) continue;
@@ -246,7 +247,11 @@ static void draw_playing_card(uint16_t* fb, int x, int y, const Card* card) {
             if (sx < 0 || sx >= DS_SCREEN_W) continue;
             uint16_t color = sprite[py * BALATRO_CARD_W + px];
             if (color != 0x0000) {
-                row_ptr[sx] = color;
+                if (debuffed && (px == py || px == (BALATRO_CARD_W - 1 - py))) {
+                    row_ptr[sx] = COLOR_MULT_RED; // Red debuff cross
+                } else {
+                    row_ptr[sx] = color;
+                }
             }
         }
     }
@@ -258,70 +263,181 @@ static void draw_playing_card(uint16_t* fb, int x, int y, const Card* card) {
     }
 }
 
+void renderer_draw_consumable_sprite(uint16_t* fb, int x, int y, const Consumable* c, bool is_selected) {
+    if (!c || c->type == CONSUMABLE_NONE) return;
+    draw_fill_rect(fb, x + 2, y + 2, BALATRO_CONS_W, BALATRO_CONS_H, COLOR_CARD_SHADOW);
+
+    int idx = c->gfx_index;
+    if (idx < 0 || idx >= BALATRO_CONSUMABLE_COUNT) idx = 0;
+    const uint16_t* sprite = s_balatro_consumables[idx];
+
+    for (int py = 0; py < BALATRO_CONS_H; ++py) {
+        int sy = y + py;
+        if (sy < 0 || sy >= DS_SCREEN_H) continue;
+        uint16_t* row_ptr = &fb[sy * DS_SCREEN_W];
+        for (int px = 0; px < BALATRO_CONS_W; ++px) {
+            int sx = x + px;
+            if (sx < 0 || sx >= DS_SCREEN_W) continue;
+            uint16_t color = sprite[py * BALATRO_CONS_W + px];
+            if (color != 0x0000) row_ptr[sx] = color;
+        }
+    }
+
+    if (is_selected) {
+        draw_outline_rect(fb, x - 1, y - 1, BALATRO_CONS_W + 2, BALATRO_CONS_H + 2, COLOR_GOLD_COIN);
+    }
+}
+
+void renderer_draw_joker_sprite(uint16_t* fb, int x, int y, const Joker* j, bool is_selected) {
+    if (!j) return;
+    draw_fill_rect(fb, x + 2, y + 2, BALATRO_JK_W, BALATRO_JK_H, COLOR_CARD_SHADOW);
+
+    int idx = j->id % BALATRO_JOKER_COUNT;
+    const uint16_t* sprite = s_balatro_jokers[idx];
+
+    for (int py = 0; py < BALATRO_JK_H; ++py) {
+        int sy = y + py;
+        if (sy < 0 || sy >= DS_SCREEN_H) continue;
+        uint16_t* row_ptr = &fb[sy * DS_SCREEN_W];
+        for (int px = 0; px < BALATRO_JK_W; ++px) {
+            int sx = x + px;
+            if (sx < 0 || sx >= DS_SCREEN_W) continue;
+            uint16_t color = sprite[py * BALATRO_JK_W + px];
+            if (color != 0x0000) row_ptr[sx] = color;
+        }
+    }
+
+    if (is_selected) {
+        draw_outline_rect(fb, x - 1, y - 1, BALATRO_JK_W + 2, BALATRO_JK_H + 2, COLOR_CARD_SELECTED);
+    }
+}
+
 // -------------------------------------------------------------
-// Top Screen Rendering (Status, Chips x Mult, Blind Chip, Jokers)
+// Top Screen Rendering (Status, Chips x Mult, Blind Chip, Jokers, Tarots)
 // -------------------------------------------------------------
 
 void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
     if (!fb || !game) return;
 
-    // Fill casino green felt background
+    // Casino Green Felt Table Background
     draw_fill_rect(fb, 0, 0, DS_SCREEN_W, DS_SCREEN_H, COLOR_TABLE_BG);
     draw_outline_rect(fb, 1, 1, DS_SCREEN_W - 2, DS_SCREEN_H - 2, COLOR_TABLE_ACCENT);
 
-    // If in Victory State, show Celebration Overlay!
+    // --- State: Victory / Cash Out Overlay ---
     if (game->current_state == STATE_ROUND_VICTORY) {
-        draw_rounded_panel(fb, 14, 18, 228, 156, COLOR_BOX_DARK, COLOR_GOLD_COIN);
-        draw_outline_rect(fb, 16, 20, 224, 152, COLOR_GOLD_COIN);
+        draw_rounded_panel(fb, 14, 16, 228, 160, COLOR_BOX_DARK, COLOR_GOLD_COIN);
+        draw_outline_rect(fb, 16, 18, 224, 156, COLOR_GOLD_COIN);
 
-        draw_string_shadow(fb, 54, 30, "*** ROUND CLEARED! ***", COLOR_GOLD_COIN, COLOR_BOX_DARK);
-        draw_string_2x_shadow(fb, 76, 44, "VICTORY", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        draw_string_shadow(fb, 54, 26, "*** ROUND CLEARED! ***", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        draw_string_2x_shadow(fb, 76, 40, "VICTORY", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
         char pay_str[32];
         sprintf(pay_str, "CASH OUT: +$%d", game->round_payout);
-        draw_string_2x_shadow(fb, 42, 68, pay_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        draw_string_2x_shadow(fb, 42, 64, pay_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
 
         int base_rew = (game->current_blind == BLIND_SMALL) ? 3 : (game->current_blind == BLIND_BIG ? 4 : 5);
-        char b1[48], b2[48], b3[48];
+        int interest = game->dollars / 5;
+        if (interest > 5) interest = 5;
+
+        char b1[48], b2[48], b3[48], b4[48];
         sprintf(b1, "Base Blind Payout:    +$%d", base_rew);
         sprintf(b2, "Leftover Hands Bonus: +$%d", game->hands_left);
-        sprintf(b3, "Total Dollars:         $%d", game->dollars);
-        draw_string(fb, 36, 96, b1, COLOR_TEXT_WHITE);
-        draw_string(fb, 36, 108, b2, COLOR_TEXT_WHITE);
-        draw_string(fb, 36, 120, b3, COLOR_GOLD_COIN);
+        sprintf(b3, "Interest Earned:      +$%d", interest);
+        sprintf(b4, "Total Money:           $%d", game->dollars);
 
-        draw_string_shadow(fb, 38, 148, "Tap [NEXT BLIND >>] on Bottom Screen", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        draw_string(fb, 32, 92, b1, COLOR_TEXT_WHITE);
+        draw_string(fb, 32, 104, b2, COLOR_TEXT_WHITE);
+        draw_string(fb, 32, 116, b3, COLOR_TEXT_WHITE);
+        draw_string(fb, 32, 128, b4, COLOR_GOLD_COIN);
+
+        draw_string_shadow(fb, 36, 150, "Tap [GO TO SHOP >>] on Bottom Screen", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
         return;
     }
 
-    // If in Game Over State, show Game Over Overlay!
+    // --- State: Game Over Overlay ---
     if (game->current_state == STATE_GAME_OVER) {
-        draw_rounded_panel(fb, 14, 18, 228, 156, COLOR_BOX_DARK, COLOR_MULT_RED);
-        draw_outline_rect(fb, 16, 20, 224, 152, COLOR_MULT_RED);
+        draw_rounded_panel(fb, 14, 16, 228, 160, COLOR_BOX_DARK, COLOR_MULT_RED);
+        draw_outline_rect(fb, 16, 18, 224, 156, COLOR_MULT_RED);
 
-        draw_string_shadow(fb, 62, 30, "*** GAME OVER ***", COLOR_MULT_RED, COLOR_BOX_DARK);
-        draw_string_2x_shadow(fb, 66, 46, "DEFEATED", COLOR_MULT_RED, COLOR_BOX_DARK);
+        draw_string_shadow(fb, 62, 28, "*** GAME OVER ***", COLOR_MULT_RED, COLOR_BOX_DARK);
+        draw_string_2x_shadow(fb, 66, 44, "DEFEATED", COLOR_MULT_RED, COLOR_BOX_DARK);
 
-        draw_string(fb, 44, 72, "You ran out of hands to play!", COLOR_TEXT_WHITE);
+        draw_string(fb, 44, 70, "You ran out of hands to play!", COLOR_TEXT_WHITE);
 
         char f_score[48];
         sprintf(f_score, "Final: %lld  /  Goal: %lld", (long long)game->current_round_score, (long long)game->target_score);
-        draw_string(fb, 38, 92, f_score, COLOR_TEXT_WHITE);
+        draw_string(fb, 36, 92, f_score, COLOR_TEXT_WHITE);
 
         char f_ante[32];
         sprintf(f_ante, "Reached: Ante %d / 8", game->ante);
-        draw_string(fb, 64, 110, f_ante, COLOR_GOLD_COIN);
+        draw_string(fb, 64, 112, f_ante, COLOR_GOLD_COIN);
 
-        draw_string_shadow(fb, 38, 148, "Tap [RESTART RUN] on Bottom Screen", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        draw_string_shadow(fb, 36, 150, "Tap [RESTART RUN] on Bottom Screen", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
         return;
     }
 
-    // --- Active Round View ---
-    // Top Title Bar
+    // --- State: Shop Top Screen ---
+    if (game->current_state == STATE_SHOP || game->current_state == STATE_BOOSTER_OPEN) {
+        draw_rounded_panel(fb, 70, 2, 116, 16, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        draw_string_shadow(fb, 80, 5, "* BALATRO SHOP *", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+        // Money Badge
+        draw_rounded_panel(fb, 8, 22, 88, 24, COLOR_RGB(24, 18, 4), COLOR_GOLD_COIN);
+        char mon_str[24];
+        sprintf(mon_str, "$%d CASH", game->dollars);
+        draw_string_2x_shadow(fb, 12, 26, mon_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+        // Jokers Info
+        char jk_info[32];
+        sprintf(jk_info, "JOKERS: %d/5", game->joker_count);
+        draw_string(fb, 108, 24, jk_info, COLOR_TEXT_WHITE);
+
+        char cs_info[32];
+        sprintf(cs_info, "CONSUMABLES: %d/2", game->consumable_count);
+        draw_string(fb, 108, 36, cs_info, COLOR_TEXT_WHITE);
+
+        // Draw Owned Jokers in a neat row
+        for (int i = 0; i < 5; ++i) {
+            int jx = 10 + i * 48;
+            int jy = 54;
+            if (i < game->joker_count && game->jokers[i]) {
+                renderer_draw_joker_sprite(fb, jx, jy, game->jokers[i], false);
+                char jname[12];
+                strncpy(jname, game->jokers[i]->name, 7);
+                jname[7] = '\0';
+                draw_string(fb, jx, jy + 38, jname, COLOR_TEXT_WHITE);
+            } else {
+                draw_rounded_panel(fb, jx, jy, 26, 36, COLOR_RGB(2, 4, 3), COLOR_BOX_BORDER);
+                draw_string(fb, jx + 8, jy + 14, "+", COLOR_RGB(8, 14, 10));
+            }
+        }
+
+        // Draw Owned Consumables (Tarots / Planets)
+        for (int c = 0; c < 2; ++c) {
+            int cx = 160 + c * 46;
+            int cy = 114;
+            if (c < game->consumable_count && game->consumables[c].type != CONSUMABLE_NONE) {
+                renderer_draw_consumable_sprite(fb, cx, cy, &game->consumables[c], false);
+                char cname[12];
+                strncpy(cname, game->consumables[c].name, 7);
+                cname[7] = '\0';
+                draw_string(fb, cx, cy + 38, cname, COLOR_GOLD_COIN);
+            } else {
+                draw_rounded_panel(fb, cx, cy, 26, 36, COLOR_RGB(2, 4, 3), COLOR_BOX_BORDER);
+                draw_string(fb, cx + 8, cy + 14, "T", COLOR_RGB(8, 14, 10));
+            }
+        }
+
+        draw_string(fb, 14, 168, "Manage or inspect your deck & inventory", COLOR_RGB(16, 22, 18));
+        return;
+    }
+
+    // --- State: Active Round Top Screen ---
+    // Title
     draw_rounded_panel(fb, 76, 2, 104, 14, COLOR_BOX_DARK, COLOR_BOX_BORDER);
     draw_string_shadow(fb, 90, 5, "* BALATRO *", COLOR_GOLD_COIN, COLOR_BOX_DARK);
 
-    // Authentic Blind Poker Chip (34x34) at (6, 20)
+    // Blind Poker Chip (34x34)
     const uint16_t* chip_sprite = s_chip_small_blind;
     if (game->current_blind == BLIND_BIG) chip_sprite = s_chip_big_blind;
     else if (game->current_blind == BLIND_BOSS) chip_sprite = s_chip_boss_blind;
@@ -334,9 +450,7 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
             int sx = 8 + px;
             if (sx < 0 || sx >= DS_SCREEN_W) continue;
             uint16_t color = chip_sprite[py * BALATRO_CHIP_SIZE + px];
-            if (color != 0x0000) {
-                row_ptr[sx] = color;
-            }
+            if (color != 0x0000) row_ptr[sx] = color;
         }
     }
 
@@ -348,12 +462,20 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
 
     const char* b_title = (game->current_blind == BLIND_SMALL ? "SMALL BLIND" :
                           (game->current_blind == BLIND_BIG   ? "BIG BLIND"   : "BOSS BLIND"));
-    draw_string_shadow(fb, 48, 38, b_title, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+    draw_string_shadow(fb, 48, 36, b_title, COLOR_GOLD_COIN, COLOR_BOX_DARK);
 
-    int reward_dollars = (game->current_blind == BLIND_SMALL) ? 3 : (game->current_blind == BLIND_BIG ? 4 : 5);
-    char rew_str[16];
-    sprintf(rew_str, "Reward: +$%d", reward_dollars);
-    draw_string(fb, 48, 48, rew_str, COLOR_RGB(16, 24, 18));
+    // If Boss Blind, display boss name and debuff description!
+    if (game->current_blind == BLIND_BOSS) {
+        BossBlindInfo binfo = boss_blind_get_info(game->current_boss);
+        char boss_desc[48];
+        sprintf(boss_desc, "%s: %s", binfo.name, binfo.description);
+        draw_string(fb, 48, 48, boss_desc, COLOR_DIAMOND_ORANGE);
+    } else {
+        int reward_dollars = (game->current_blind == BLIND_SMALL) ? 3 : 4;
+        char rew_str[16];
+        sprintf(rew_str, "Reward: +$%d", reward_dollars);
+        draw_string(fb, 48, 48, rew_str, COLOR_RGB(16, 24, 18));
+    }
 
     // Target Score Panel
     draw_rounded_panel(fb, 144, 18, 106, 38, COLOR_BOX_DARK, COLOR_BOX_BORDER);
@@ -369,24 +491,16 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
     sprintf(score_str, "%lld / %lld", (long long)game->current_round_score, (long long)game->target_score);
     draw_string_shadow(fb, 94, 64, score_str, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
-    // Subtle Progress Gauge inside score bar
     if (game->target_score > 0) {
-        int bar_w = (int)((game->current_round_score * 50) / game->target_score);
-        if (bar_w > 50) bar_w = 50;
-        if (bar_w > 0) {
-            draw_fill_rect(fb, 194, 63, bar_w, 10, COLOR_GOLD_COIN);
-        }
-        draw_outline_rect(fb, 193, 62, 52, 12, COLOR_BOX_BORDER);
+        int bar_w = (int)((game->current_round_score * 48) / game->target_score);
+        if (bar_w > 48) bar_w = 48;
+        if (bar_w > 0) draw_fill_rect(fb, 196, 63, bar_w, 10, COLOR_GOLD_COIN);
+        draw_outline_rect(fb, 195, 62, 50, 12, COLOR_BOX_BORDER);
     }
-
-    // Jokers Tray (5 mini card slots)
-    // Displayed in a neat row if any are equipped
-    // (Jokers are drawn if equipped)
 
     // Iconic Chips & Mult Calculator Box
     draw_rounded_panel(fb, 6, 82, 244, 82, COLOR_BOX_DARK, COLOR_BOX_BORDER);
 
-    // Determine values to show: Live Selection Preview if cards selected, else last scored hand
     int64_t disp_chips = 0;
     double disp_mult = 1.0;
     const char* hand_display_name = "SELECT 1-5 CARDS";
@@ -411,7 +525,7 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
     sprintf(chips_val, "%lld", (long long)disp_chips);
     draw_string_2x_shadow(fb, 22, 106, chips_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
-    // Center Gold "X" multiplication sign
+    // Center Gold "X"
     draw_string_2x_shadow(fb, 118, 102, "X", COLOR_GOLD_COIN, COLOR_BOX_DARK);
 
     // Red Mult Box (Right)
@@ -422,7 +536,7 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
     sprintf(mult_val, "%.1f", disp_mult);
     draw_string_2x_shadow(fb, 156, 106, mult_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
-    // Hand Name Badge (Shows live detected poker hand name!)
+    // Hand Name Badge
     uint16_t h_col = is_previewing ? COLOR_GOLD_COIN : COLOR_RGB(14, 20, 16);
     draw_string_shadow(fb, 14, 138, hand_display_name, h_col, COLOR_BOX_DARK);
 
@@ -453,25 +567,25 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
 }
 
 // -------------------------------------------------------------
-// Bottom Screen Rendering (The Hand, Stylus Touch Buttons)
+// Bottom Screen Rendering (The Hand, Stylus Touch Buttons, Shop, Booster)
 // -------------------------------------------------------------
 
 void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
     if (!fb || !game) return;
 
-    // Rich Green Felt Table Background
+    // Green Felt Table Background
     draw_fill_rect(fb, 0, 0, DS_SCREEN_W, DS_SCREEN_H, COLOR_TABLE_BG);
     draw_outline_rect(fb, 1, 1, DS_SCREEN_W - 2, DS_SCREEN_H - 2, COLOR_TABLE_ACCENT);
 
-    // If Victory State: Show Big [NEXT BLIND >>] Button
+    // --- State: Victory State Button ---
     if (game->current_state == STATE_ROUND_VICTORY) {
         draw_rounded_panel(fb, 24, 130, 208, 52, COLOR_RGB(4, 26, 10), COLOR_GOLD_COIN);
         draw_outline_rect(fb, 26, 132, 204, 48, COLOR_GOLD_COIN);
-        draw_string_2x_shadow(fb, 48, 146, "NEXT BLIND >>", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        draw_string_2x_shadow(fb, 44, 146, "GO TO SHOP >>", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
         return;
     }
 
-    // If Game Over State: Show Big [RESTART RUN] Button
+    // --- State: Game Over State Button ---
     if (game->current_state == STATE_GAME_OVER) {
         draw_rounded_panel(fb, 24, 130, 208, 52, COLOR_RGB(28, 6, 6), COLOR_GOLD_COIN);
         draw_outline_rect(fb, 26, 132, 204, 48, COLOR_GOLD_COIN);
@@ -479,7 +593,106 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
         return;
     }
 
-    // Active Round Controls:
+    // --- State: The Shop ---
+    if (game->current_state == STATE_SHOP) {
+        // Shop Card Slot 0
+        int s0_x = 10;
+        int s0_y = 12;
+        draw_rounded_panel(fb, s0_x, s0_y, 70, 78, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        if (!game->shop.slots[0].is_sold) {
+            renderer_draw_joker_sprite(fb, s0_x + 22, s0_y + 6, &game->shop.slots[0].data.joker, false);
+            draw_string(fb, s0_x + 4, s0_y + 46, game->shop.slots[0].data.joker.name, COLOR_TEXT_WHITE);
+            char c0_str[16];
+            sprintf(c0_str, "BUY: $%d", game->shop.slots[0].cost);
+            draw_rounded_panel(fb, s0_x + 6, s0_y + 58, 58, 16, COLOR_RGB(4, 18, 8), COLOR_GOLD_COIN);
+            draw_string(fb, s0_x + 10, s0_y + 62, c0_str, COLOR_GOLD_COIN);
+        } else {
+            draw_string(fb, s0_x + 12, s0_y + 36, "SOLD", COLOR_RGB(16, 12, 12));
+        }
+
+        // Shop Card Slot 1 (Tarot or Planet)
+        int s1_x = 86;
+        int s1_y = 12;
+        draw_rounded_panel(fb, s1_x, s1_y, 70, 78, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        if (!game->shop.slots[1].is_sold) {
+            renderer_draw_consumable_sprite(fb, s1_x + 22, s1_y + 6, &game->shop.slots[1].data.consumable, false);
+            draw_string(fb, s1_x + 4, s1_y + 46, game->shop.slots[1].data.consumable.name, COLOR_TEXT_WHITE);
+            char c1_str[16];
+            sprintf(c1_str, "BUY: $%d", game->shop.slots[1].cost);
+            draw_rounded_panel(fb, s1_x + 6, s1_y + 58, 58, 16, COLOR_RGB(4, 18, 8), COLOR_GOLD_COIN);
+            draw_string(fb, s1_x + 10, s1_y + 62, c1_str, COLOR_GOLD_COIN);
+        } else {
+            draw_string(fb, s1_x + 12, s1_y + 36, "SOLD", COLOR_RGB(16, 12, 12));
+        }
+
+        // Booster Pack Slot
+        int sp_x = 162;
+        int sp_y = 12;
+        draw_rounded_panel(fb, sp_x, sp_y, 84, 78, COLOR_RGB(14, 8, 22), COLOR_RGB(24, 12, 31));
+        if (!game->shop.pack_slot.is_sold) {
+            const char* pname = (game->shop.pack_slot.data.pack_type == PACK_ARCANA) ? "Arcana" :
+                                (game->shop.pack_slot.data.pack_type == PACK_CELESTIAL) ? "Celestial" : "Buffoon";
+            draw_string_shadow(fb, sp_x + 8, sp_y + 8, pname, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+            draw_string(fb, sp_x + 8, sp_y + 22, "Booster Pack", COLOR_TEXT_WHITE);
+            draw_rounded_panel(fb, sp_x + 10, sp_y + 52, 64, 18, COLOR_RGB(28, 16, 4), COLOR_GOLD_COIN);
+            draw_string(fb, sp_x + 16, sp_y + 56, "OPEN ($4)", COLOR_GOLD_COIN);
+        } else {
+            draw_string(fb, sp_x + 24, sp_y + 36, "OPENED", COLOR_RGB(16, 12, 12));
+        }
+
+        // Voucher Slot
+        int sv_x = 10;
+        int sv_y = 96;
+        draw_rounded_panel(fb, sv_x, sv_y, 146, 36, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        if (!game->shop.voucher_slot.is_sold) {
+            draw_string(fb, sv_x + 8, sv_y + 6, "Voucher: Permanent Upgrade", COLOR_GOLD_COIN);
+            char v_str[32];
+            sprintf(v_str, "BUY VOUCHER ($%d)", game->shop.voucher_slot.cost);
+            draw_string(fb, sv_x + 8, sv_y + 20, v_str, COLOR_TEXT_WHITE);
+        } else {
+            draw_string(fb, sv_x + 8, sv_y + 14, "VOUCHER PURCHASED", COLOR_RGB(12, 18, 12));
+        }
+
+        // Bottom Controls: REROLL and NEXT BLIND
+        draw_rounded_panel(fb, 10, 140, 110, 44, COLOR_RGB(24, 14, 4), COLOR_GOLD_COIN);
+        char r_str[24];
+        sprintf(r_str, "REROLL ($%d)", game->shop.reroll_cost);
+        draw_string_shadow(fb, 22, 156, r_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+        draw_rounded_panel(fb, 128, 140, 118, 44, COLOR_RGB(4, 26, 10), COLOR_GOLD_COIN);
+        draw_string_2x_shadow(fb, 136, 152, "NEXT BLIND", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        return;
+    }
+
+    // --- State: Booster Opening ---
+    if (game->current_state == STATE_BOOSTER_OPEN) {
+        draw_rounded_panel(fb, 14, 8, 228, 24, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        draw_string_shadow(fb, 48, 14, "CHOOSE 1 CARD TO ADD TO DECK", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+        for (int i = 0; i < 3; ++i) {
+            int cx = 20 + i * 76;
+            int cy = 46;
+            const ShopSlot* card_slot = &game->shop.pack_cards[i];
+            draw_rounded_panel(fb, cx, cy, 66, 88, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+
+            if (card_slot->type == SHOP_ITEM_TAROT || card_slot->type == SHOP_ITEM_PLANET) {
+                renderer_draw_consumable_sprite(fb, cx + 20, cy + 8, &card_slot->data.consumable, false);
+                draw_string(fb, cx + 4, cy + 48, card_slot->data.consumable.name, COLOR_TEXT_WHITE);
+            } else if (card_slot->type == SHOP_ITEM_JOKER) {
+                renderer_draw_joker_sprite(fb, cx + 20, cy + 8, &card_slot->data.joker, false);
+                draw_string(fb, cx + 4, cy + 48, card_slot->data.joker.name, COLOR_TEXT_WHITE);
+            }
+
+            draw_rounded_panel(fb, cx + 8, cy + 66, 50, 16, COLOR_RGB(4, 20, 8), COLOR_GOLD_COIN);
+            draw_string(fb, cx + 14, cy + 70, "SELECT", COLOR_GOLD_COIN);
+        }
+
+        draw_rounded_panel(fb, 76, 148, 104, 34, COLOR_RGB(16, 4, 6), COLOR_MULT_RED);
+        draw_string_shadow(fb, 100, 158, "SKIP PACK", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        return;
+    }
+
+    // --- State: Active Round Controls ---
     // Sort Buttons
     draw_rounded_panel(fb, 8, 6, 82, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER);
     draw_string(fb, 14, 11, "SORT: RANK", COLOR_TEXT_WHITE);
@@ -487,23 +700,32 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
     draw_rounded_panel(fb, 96, 6, 82, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER);
     draw_string(fb, 102, 11, "SORT: SUIT", COLOR_TEXT_WHITE);
 
-    // Hand card count badge
-    char hand_count_str[16];
-    sprintf(hand_count_str, "HAND %d/%d", game->deck.hand.count, game->deck.hand_size_limit);
-    draw_string(fb, 188, 11, hand_count_str, COLOR_RGB(16, 22, 18));
+    // If Consumable is selected, show [USE] and [SELL] buttons!
+    if (game->selected_consumable_slot >= 0 && game->selected_consumable_slot < MAX_CONSUMABLES_SLOTS) {
+        Consumable* sc = (Consumable*)&game->consumables[game->selected_consumable_slot];
+        if (sc->type != CONSUMABLE_NONE) {
+            draw_rounded_panel(fb, 184, 6, 66, 18, COLOR_RGB(4, 24, 8), COLOR_GOLD_COIN);
+            draw_string(fb, 192, 11, "USE CARD", COLOR_TEXT_WHITE);
+        }
+    } else {
+        char hand_count_str[16];
+        sprintf(hand_count_str, "HAND %d/%d", game->deck.hand.count, game->deck.hand_size_limit);
+        draw_string(fb, 188, 11, hand_count_str, COLOR_RGB(16, 22, 18));
+    }
 
-    // Draw Authentic Balatro Cards spread out horizontally
+    // Draw Authentic Balatro Cards
     int start_x = 8;
     int base_y = 66;
 
     for (int i = 0; i < game->deck.hand.count; ++i) {
         int cx = start_x + (i * 30);
-        // If selected, card LIFTS UP by 14 pixels
         int cy = game->deck.hand.cards[i].is_selected ? (base_y - 14) : base_y;
 
-        draw_playing_card(fb, cx, cy, &game->deck.hand.cards[i]);
+        bool debuffed = (game->current_blind == BLIND_BOSS) &&
+                        boss_blind_is_card_debuffed(game->current_boss, &game->deck.hand.cards[i]);
 
-        // Draw card index number below
+        renderer_draw_card_sprite(fb, cx, cy, &game->deck.hand.cards[i], debuffed);
+
         char num_buf[4];
         sprintf(num_buf, "%d", i + 1);
         uint16_t num_col = game->deck.hand.cards[i].is_selected ? COLOR_CARD_SELECTED : COLOR_RGB(10, 18, 14);
@@ -514,7 +736,7 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
     const Card* sel_cards[5];
     int sel_count = deck_get_selected_cards((DeckManager*)&game->deck, sel_cards);
 
-    // PLAY HAND Button (Big Blue)
+    // PLAY HAND Button
     uint16_t play_bg = (sel_count > 0) ? COLOR_PLAY_BTN : COLOR_RGB(2, 8, 14);
     draw_rounded_panel(fb, 12, 136, 112, 44, play_bg, COLOR_RGB(10, 24, 31));
     draw_outline_rect(fb, 13, 137, 110, 42, (sel_count > 0) ? COLOR_CHIPS_BLUE : COLOR_RGB(4, 12, 18));
@@ -528,7 +750,7 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
         draw_string(fb, 18, 154, "SELECT CARDS", COLOR_RGB(12, 16, 18));
     }
 
-    // DISCARD Button (Big Red)
+    // DISCARD Button
     bool can_discard = (game->discards_left > 0 && sel_count > 0);
     uint16_t disc_bg = can_discard ? COLOR_DISCARD_BTN : COLOR_RGB(14, 3, 4);
     draw_rounded_panel(fb, 132, 136, 112, 44, disc_bg, COLOR_RGB(31, 10, 12));

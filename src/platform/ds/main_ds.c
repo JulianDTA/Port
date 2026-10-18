@@ -10,6 +10,9 @@
 #include "core/poker_hand.h"
 #include "core/jokers.h"
 #include "core/deck.h"
+#include "core/consumable.h"
+#include "core/boss_blinds.h"
+#include "core/shop.h"
 
 #ifdef ARM9
 static touchPosition s_touch;
@@ -17,16 +20,12 @@ static uint16_t* s_top_fb = NULL;
 static uint16_t* s_sub_fb = NULL;
 
 void hal_init(void) {
-    // 16-bit direct bitmap mode on both screens (MODE 5 2D)
     videoSetMode(MODE_5_2D);
     videoSetModeSub(MODE_5_2D);
 
-    // Map VRAM Bank A (128 KB) to Main engine background
-    // Map VRAM Bank C (128 KB) to Sub engine background
     vramSetBankA(VRAM_A_MAIN_BG);
     vramSetBankC(VRAM_C_SUB_BG);
 
-    // Initialize layer 3 as a 16-bit bitmap on both screens
     int bgTop = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     int bgSub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
 
@@ -95,21 +94,24 @@ int main(int argc, char* argv[]) {
             int tx = input.touch_x;
             int ty = input.touch_y;
 
+            // State: Round Active
             if (game.current_state == STATE_ROUND_ACTIVE) {
                 // 1. Sort Buttons
-                // Sort by Rank (x: 6..90, y: 4..28)
                 if (tx >= 6 && tx <= 90 && ty >= 4 && ty <= 28) {
                     deck_sort_by_rank(&game.deck);
                     game_update_selection_preview(&game);
                     need_redraw = true;
-                }
-                // Sort by Suit (x: 94..178, y: 4..28)
-                else if (tx >= 94 && tx <= 178 && ty >= 4 && ty <= 28) {
+                } else if (tx >= 94 && tx <= 178 && ty >= 4 && ty <= 28) {
                     deck_sort_by_suit(&game.deck);
                     game_update_selection_preview(&game);
                     need_redraw = true;
                 }
-                // 2. Touch Cards in Hand (generous bounds: y: 44..124)
+                // 2. Use Consumable Button (if one is active)
+                else if (game.selected_consumable_slot >= 0 && tx >= 180 && tx <= 252 && ty >= 4 && ty <= 28) {
+                    consumable_use(&game, game.selected_consumable_slot);
+                    need_redraw = true;
+                }
+                // 3. Cards in Hand (generous touch bounds)
                 else if (ty >= 44 && ty <= 124) {
                     for (int i = 0; i < game.deck.hand.count; ++i) {
                         int cx = 8 + (i * 30);
@@ -129,22 +131,68 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 }
-                // 3. Touch [PLAY HAND] Button (x: 10..126, y: 134..186)
+                // 4. [PLAY HAND] Button
                 else if (tx >= 10 && tx <= 126 && ty >= 134 && ty <= 186) {
                     input.btn_a = true;
                 }
-                // 4. Touch [DISCARD] Button (x: 130..246, y: 134..186)
+                // 5. [DISCARD] Button
                 else if (tx >= 130 && tx <= 246 && ty >= 134 && ty <= 186) {
                     input.btn_b = true;
                 }
-            } else if (game.current_state == STATE_ROUND_VICTORY) {
-                // Touch [NEXT BLIND >>] Button (x: 20..236, y: 126..186)
+            }
+            // State: Round Victory (Cash Out)
+            else if (game.current_state == STATE_ROUND_VICTORY) {
                 if (tx >= 20 && tx <= 236 && ty >= 126 && ty <= 186) {
+                    game_advance_to_shop(&game);
+                    need_redraw = true;
+                }
+            }
+            // State: The Shop
+            else if (game.current_state == STATE_SHOP) {
+                // Buy Slot 0 (Joker)
+                if (tx >= 10 && tx <= 80 && ty >= 12 && ty <= 90) {
+                    if (shop_buy_card_slot(&game, 0)) need_redraw = true;
+                }
+                // Buy Slot 1 (Tarot/Planet)
+                else if (tx >= 86 && tx <= 156 && ty >= 12 && ty <= 90) {
+                    if (shop_buy_card_slot(&game, 1)) need_redraw = true;
+                }
+                // Open Booster Pack
+                else if (tx >= 162 && tx <= 246 && ty >= 12 && ty <= 90) {
+                    if (shop_buy_pack(&game)) need_redraw = true;
+                }
+                // Buy Voucher
+                else if (tx >= 10 && tx <= 156 && ty >= 96 && ty <= 134) {
+                    if (shop_buy_voucher(&game)) need_redraw = true;
+                }
+                // Reroll Shop
+                else if (tx >= 10 && tx <= 120 && ty >= 140 && ty <= 186) {
+                    if (shop_reroll(&game)) need_redraw = true;
+                }
+                // Next Blind
+                else if (tx >= 128 && tx <= 246 && ty >= 140 && ty <= 186) {
                     game_advance_next_blind(&game);
                     need_redraw = true;
                 }
-            } else if (game.current_state == STATE_GAME_OVER) {
-                // Touch [RESTART RUN] Button (x: 20..236, y: 126..186)
+            }
+            // State: Booster Pack Open
+            else if (game.current_state == STATE_BOOSTER_OPEN) {
+                if (tx >= 20 && tx <= 86 && ty >= 46 && ty <= 134) {
+                    shop_choose_pack_card(&game, 0);
+                    need_redraw = true;
+                } else if (tx >= 96 && tx <= 162 && ty >= 46 && ty <= 134) {
+                    shop_choose_pack_card(&game, 1);
+                    need_redraw = true;
+                } else if (tx >= 172 && tx <= 238 && ty >= 46 && ty <= 134) {
+                    shop_choose_pack_card(&game, 2);
+                    need_redraw = true;
+                } else if (tx >= 76 && tx <= 180 && ty >= 146 && ty <= 186) {
+                    game.current_state = STATE_SHOP; // Skip pack
+                    need_redraw = true;
+                }
+            }
+            // State: Game Over
+            else if (game.current_state == STATE_GAME_OVER) {
                 if (tx >= 20 && tx <= 236 && ty >= 126 && ty <= 186) {
                     game_session_start_run(&game);
                     game_update_selection_preview(&game);
@@ -154,13 +202,14 @@ int main(int argc, char* argv[]) {
         }
 
         // --- Physical DS Buttons Handling ---
-        // Button A: Play Hand (or advance / restart when round ends)
+        // Button A
         if (input.btn_a) {
             if (game.current_state == STATE_ROUND_ACTIVE) {
-                if (game_play_selected_hand(&game)) {
-                    need_redraw = true;
-                }
+                if (game_play_selected_hand(&game)) need_redraw = true;
             } else if (game.current_state == STATE_ROUND_VICTORY) {
+                game_advance_to_shop(&game);
+                need_redraw = true;
+            } else if (game.current_state == STATE_SHOP) {
                 game_advance_next_blind(&game);
                 need_redraw = true;
             } else if (game.current_state == STATE_GAME_OVER) {
@@ -172,28 +221,37 @@ int main(int argc, char* argv[]) {
 
         // Button B: Discard
         if (input.btn_b && game.current_state == STATE_ROUND_ACTIVE) {
-            if (game_discard_selected_cards(&game)) {
-                need_redraw = true;
-            }
+            if (game_discard_selected_cards(&game)) need_redraw = true;
         }
 
-        // Button X or L Shoulder: Sort by Rank
+        // Button X / L: Sort Rank
         if ((input.btn_x || input.btn_l) && game.current_state == STATE_ROUND_ACTIVE) {
             deck_sort_by_rank(&game.deck);
             game_update_selection_preview(&game);
             need_redraw = true;
         }
 
-        // Button Y or R Shoulder: Sort by Suit
+        // Button Y / R: Sort Suit
         if ((input.btn_y || input.btn_r) && game.current_state == STATE_ROUND_ACTIVE) {
             deck_sort_by_suit(&game.deck);
             game_update_selection_preview(&game);
             need_redraw = true;
         }
 
-        // Button Start: Advance Next Blind or Restart Run
+        // Button Select: Cycle Consumable selection
+        if (input.btn_select && game.current_state == STATE_ROUND_ACTIVE) {
+            if (game.consumable_count > 0) {
+                game.selected_consumable_slot = (game.selected_consumable_slot + 1) % MAX_CONSUMABLES_SLOTS;
+                need_redraw = true;
+            }
+        }
+
+        // Button Start: Next Blind / Advance
         if (input.btn_start) {
             if (game.current_state == STATE_ROUND_VICTORY) {
+                game_advance_to_shop(&game);
+                need_redraw = true;
+            } else if (game.current_state == STATE_SHOP) {
                 game_advance_next_blind(&game);
                 need_redraw = true;
             } else if (game.current_state == STATE_GAME_OVER) {

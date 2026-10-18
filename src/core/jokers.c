@@ -453,6 +453,11 @@ void joker_create(Joker* joker, JokerId id, CardEdition edition) {
             joker->name = "Blank Joker";
             break;
     }
+
+    joker->sell_value = (joker->cost > 1) ? (joker->cost / 2) : 1;
+    if (joker->edition != EDITION_NONE) {
+        joker->sell_value += 1; // Edition bonus sell value
+    }
 }
 
 static void apply_joker_edition(const Joker* j, ScoreState* score) {
