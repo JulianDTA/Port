@@ -172,9 +172,10 @@ bool game_play_selected_hand(GameSession* game) {
     if (game->current_round_score >= game->target_score) {
         game->current_state = STATE_ROUND_VICTORY;
         // Payout money: $3 for Small Blind, $4 for Big, $5 for Boss + leftover hands
-        int reward = (game->current_blind == BLIND_SMALL) ? 3 : (game->current_blind == BLIND_BIG ? 4 : 5);
-        reward += game->hands_left;
-        game->dollars += reward;
+        int base_reward = (game->current_blind == BLIND_SMALL) ? 3 : (game->current_blind == BLIND_BIG ? 4 : 5);
+        int bonus_hands = game->hands_left;
+        game->round_payout = base_reward + bonus_hands;
+        game->dollars += game->round_payout;
 
         // Trigger end of round effects (e.g. Popcorn decay, Gros Michel)
         joker_trigger_round_end(game->jokers, &game->joker_count);
@@ -185,6 +186,7 @@ bool game_play_selected_hand(GameSession* game) {
         deck_draw_up_to_limit(&game->deck);
     }
 
+    game_update_selection_preview(game);
     return true;
 }
 
@@ -199,5 +201,38 @@ bool game_discard_selected_cards(GameSession* game) {
     game->discards_left--;
     deck_draw_up_to_limit(&game->deck);
 
+    game_update_selection_preview(game);
     return true;
+}
+
+void game_update_selection_preview(GameSession* game) {
+    if (!game) return;
+    const Card* selected[5];
+    int count = deck_get_selected_cards(&game->deck, selected);
+    if (count == 0) {
+        memset(&game->preview_eval, 0, sizeof(HandEvaluation));
+        score_state_init(&game->preview_score, 0, 0.0);
+        return;
+    }
+
+    game->preview_eval = poker_evaluate_played(selected, count, game->hand_levels);
+    score_state_init(&game->preview_score, game->preview_eval.initial_chips, (double)game->preview_eval.initial_mult);
+
+    // Add scoring card base chips
+    for (int i = 0; i < game->preview_eval.scoring_count; ++i) {
+        score_state_add_chips(&game->preview_score, card_get_base_chips(game->preview_eval.scoring_cards[i]));
+    }
+}
+
+void game_advance_next_blind(GameSession* game) {
+    if (!game) return;
+    if (game->current_blind == BLIND_SMALL) {
+        game_session_select_blind(game, BLIND_BIG);
+    } else if (game->current_blind == BLIND_BIG) {
+        game_session_select_blind(game, BLIND_BOSS);
+    } else {
+        game->ante++;
+        game_session_select_blind(game, BLIND_SMALL);
+    }
+    game_update_selection_preview(game);
 }

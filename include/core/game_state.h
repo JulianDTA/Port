@@ -47,13 +47,20 @@ typedef struct {
     // Last played scoring animation info
     HandEvaluation last_eval;
     ScoreState last_score;
+
+    // Real-time dynamic selection preview (before pressing Play)
+    HandEvaluation preview_eval;
+    ScoreState preview_score;
+    int round_payout;
 } GameSession;
 
 void game_session_init(GameSession* game);
 void game_session_start_run(GameSession* game);
 void game_session_select_blind(GameSession* game, BlindType blind);
 int64_t game_calculate_blind_target(int ante, BlindType blind);
+void game_update_selection_preview(GameSession* game);
 bool game_play_selected_hand(GameSession* game);
 bool game_discard_selected_cards(GameSession* game);
+void game_advance_next_blind(GameSession* game);
 
 #endif // GAME_STATE_H

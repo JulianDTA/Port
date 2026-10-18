@@ -20,6 +20,8 @@ typedef struct {
     bool btn_b;
     bool btn_x;
     bool btn_y;
+    bool btn_l;
+    bool btn_r;
     bool btn_start;
     bool btn_select;
     int dpad_x;

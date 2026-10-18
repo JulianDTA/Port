@@ -1,5 +1,6 @@
 #include "core/deck.h"
 #include <string.h>
+#include <stdlib.h>
 
 void deck_init_standard(DeckManager* dm) {
     if (!dm) return;
@@ -97,4 +98,32 @@ void deck_remove_selected_from_hand(DeckManager* dm) {
         }
     }
     dm->hand.count = new_hand_count;
+}
+
+static int cmp_card_rank(const void* a, const void* b) {
+    const Card* ca = (const Card*)a;
+    const Card* cb = (const Card*)b;
+    if (cb->rank != ca->rank) {
+        return (int)cb->rank - (int)ca->rank;
+    }
+    return (int)ca->suit - (int)cb->suit;
+}
+
+static int cmp_card_suit(const void* a, const void* b) {
+    const Card* ca = (const Card*)a;
+    const Card* cb = (const Card*)b;
+    if (ca->suit != cb->suit) {
+        return (int)ca->suit - (int)cb->suit;
+    }
+    return (int)cb->rank - (int)ca->rank;
+}
+
+void deck_sort_by_rank(DeckManager* dm) {
+    if (!dm || dm->hand.count <= 1) return;
+    qsort(dm->hand.cards, dm->hand.count, sizeof(Card), cmp_card_rank);
+}
+
+void deck_sort_by_suit(DeckManager* dm) {
+    if (!dm || dm->hand.count <= 1) return;
+    qsort(dm->hand.cards, dm->hand.count, sizeof(Card), cmp_card_suit);
 }

@@ -9,6 +9,7 @@
 #include "core/card.h"
 #include "core/poker_hand.h"
 #include "core/jokers.h"
+#include "core/deck.h"
 
 #ifdef ARM9
 static touchPosition s_touch;
@@ -49,6 +50,8 @@ void hal_update_input(PlatformInput* input) {
     input->btn_b = (keys_down & KEY_B) != 0;
     input->btn_x = (keys_down & KEY_X) != 0;
     input->btn_y = (keys_down & KEY_Y) != 0;
+    input->btn_l = (keys_down & KEY_L) != 0;
+    input->btn_r = (keys_down & KEY_R) != 0;
     input->btn_start = (keys_down & KEY_START) != 0;
     input->btn_select = (keys_down & KEY_SELECT) != 0;
 
@@ -77,16 +80,7 @@ int main(int argc, char* argv[]) {
     GameSession game;
     game_session_init(&game);
     game_session_start_run(&game);
-
-    // Equip starting Jokers for visual flair
-    Joker cavendish, lusty, joker_card;
-    joker_create(&cavendish, JOKER_CAVENDISH, EDITION_NONE);
-    joker_create(&lusty, JOKER_LUSTY, EDITION_NONE);
-    joker_create(&joker_card, JOKER_JOKER, EDITION_FOIL);
-    game.jokers[0] = &cavendish;
-    game.jokers[1] = &lusty;
-    game.jokers[2] = &joker_card;
-    game.joker_count = 3;
+    game_update_selection_preview(&game);
 
     PlatformInput input;
     memset(&input, 0, sizeof(input));
@@ -96,67 +90,120 @@ int main(int argc, char* argv[]) {
     while (1) {
         hal_update_input(&input);
 
-        // Stylus Touch Controls on Bottom Screen
+        // --- Stylus Touch Controls on Bottom Screen ---
         if (input.touch_just_pressed) {
             int tx = input.touch_x;
             int ty = input.touch_y;
 
-            // 1. Touch Cards in Hand (x from 8 to 248, y from 45 to 115)
-            if (ty >= 45 && ty <= 115) {
-                for (int i = 0; i < game.deck.hand.count; ++i) {
-                    int cx = 8 + (i * 30);
-                    if (tx >= cx && tx <= cx + 28) {
-                        const Card* sel[5];
-                        int count = deck_get_selected_cards(&game.deck, sel);
-                        if (game.deck.hand.cards[i].is_selected) {
-                            game.deck.hand.cards[i].is_selected = false;
-                            need_redraw = true;
-                        } else if (count < 5) {
-                            game.deck.hand.cards[i].is_selected = true;
-                            need_redraw = true;
+            if (game.current_state == STATE_ROUND_ACTIVE) {
+                // 1. Sort Buttons
+                // Sort by Rank (x: 6..90, y: 4..28)
+                if (tx >= 6 && tx <= 90 && ty >= 4 && ty <= 28) {
+                    deck_sort_by_rank(&game.deck);
+                    game_update_selection_preview(&game);
+                    need_redraw = true;
+                }
+                // Sort by Suit (x: 94..178, y: 4..28)
+                else if (tx >= 94 && tx <= 178 && ty >= 4 && ty <= 28) {
+                    deck_sort_by_suit(&game.deck);
+                    game_update_selection_preview(&game);
+                    need_redraw = true;
+                }
+                // 2. Touch Cards in Hand (generous bounds: y: 44..124)
+                else if (ty >= 44 && ty <= 124) {
+                    for (int i = 0; i < game.deck.hand.count; ++i) {
+                        int cx = 8 + (i * 30);
+                        if (tx >= cx - 2 && tx <= cx + 28) {
+                            const Card* sel[5];
+                            int count = deck_get_selected_cards(&game.deck, sel);
+                            if (game.deck.hand.cards[i].is_selected) {
+                                game.deck.hand.cards[i].is_selected = false;
+                                game_update_selection_preview(&game);
+                                need_redraw = true;
+                            } else if (count < 5) {
+                                game.deck.hand.cards[i].is_selected = true;
+                                game_update_selection_preview(&game);
+                                need_redraw = true;
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
-            }
-
-            // 2. Touch [PLAY HAND] Button (x: 16 to 124, y: 138 to 180)
-            if (tx >= 16 && tx <= 124 && ty >= 138 && ty <= 180) {
-                input.btn_a = true;
-            }
-
-            // 3. Touch [DISCARD] Button (x: 132 to 240, y: 138 to 180)
-            if (tx >= 132 && tx <= 240 && ty >= 138 && ty <= 180) {
-                input.btn_b = true;
+                // 3. Touch [PLAY HAND] Button (x: 10..126, y: 134..186)
+                else if (tx >= 10 && tx <= 126 && ty >= 134 && ty <= 186) {
+                    input.btn_a = true;
+                }
+                // 4. Touch [DISCARD] Button (x: 130..246, y: 134..186)
+                else if (tx >= 130 && tx <= 246 && ty >= 134 && ty <= 186) {
+                    input.btn_b = true;
+                }
+            } else if (game.current_state == STATE_ROUND_VICTORY) {
+                // Touch [NEXT BLIND >>] Button (x: 20..236, y: 126..186)
+                if (tx >= 20 && tx <= 236 && ty >= 126 && ty <= 186) {
+                    game_advance_next_blind(&game);
+                    need_redraw = true;
+                }
+            } else if (game.current_state == STATE_GAME_OVER) {
+                // Touch [RESTART RUN] Button (x: 20..236, y: 126..186)
+                if (tx >= 20 && tx <= 236 && ty >= 126 && ty <= 186) {
+                    game_session_start_run(&game);
+                    game_update_selection_preview(&game);
+                    need_redraw = true;
+                }
             }
         }
 
-        // Action: PLAY HAND (Button A or Play button touched)
+        // --- Physical DS Buttons Handling ---
+        // Button A: Play Hand (or advance / restart when round ends)
         if (input.btn_a) {
-            if (game_play_selected_hand(&game)) {
-                need_redraw = true;
-                if (game.current_state == STATE_ROUND_VICTORY) {
-                    // Advance to next blind
-                    if (game.current_blind == BLIND_SMALL) {
-                        game_session_select_blind(&game, BLIND_BIG);
-                    } else if (game.current_blind == BLIND_BIG) {
-                        game_session_select_blind(&game, BLIND_BOSS);
-                    } else {
-                        game.ante++;
-                        game_session_select_blind(&game, BLIND_SMALL);
-                    }
+            if (game.current_state == STATE_ROUND_ACTIVE) {
+                if (game_play_selected_hand(&game)) {
+                    need_redraw = true;
                 }
+            } else if (game.current_state == STATE_ROUND_VICTORY) {
+                game_advance_next_blind(&game);
+                need_redraw = true;
+            } else if (game.current_state == STATE_GAME_OVER) {
+                game_session_start_run(&game);
+                game_update_selection_preview(&game);
+                need_redraw = true;
             }
         }
 
-        // Action: DISCARD (Button B or Discard button touched)
-        if (input.btn_b) {
+        // Button B: Discard
+        if (input.btn_b && game.current_state == STATE_ROUND_ACTIVE) {
             if (game_discard_selected_cards(&game)) {
                 need_redraw = true;
             }
         }
 
-        // Render graphical screens when needed
+        // Button X or L Shoulder: Sort by Rank
+        if ((input.btn_x || input.btn_l) && game.current_state == STATE_ROUND_ACTIVE) {
+            deck_sort_by_rank(&game.deck);
+            game_update_selection_preview(&game);
+            need_redraw = true;
+        }
+
+        // Button Y or R Shoulder: Sort by Suit
+        if ((input.btn_y || input.btn_r) && game.current_state == STATE_ROUND_ACTIVE) {
+            deck_sort_by_suit(&game.deck);
+            game_update_selection_preview(&game);
+            need_redraw = true;
+        }
+
+        // Button Start: Advance Next Blind or Restart Run
+        if (input.btn_start) {
+            if (game.current_state == STATE_ROUND_VICTORY) {
+                game_advance_next_blind(&game);
+                need_redraw = true;
+            } else if (game.current_state == STATE_GAME_OVER) {
+                game_session_start_run(&game);
+                game_update_selection_preview(&game);
+                need_redraw = true;
+            }
+        }
+
+        // --- Render graphical screens ---
 #ifdef ARM9
         if (need_redraw && s_top_fb && s_sub_fb) {
             renderer_draw_top_screen(s_top_fb, &game);

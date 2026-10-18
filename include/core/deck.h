@@ -27,5 +27,7 @@ void deck_draw_up_to_limit(DeckManager* dm);
 void deck_discard_selected(DeckManager* dm);
 int deck_get_selected_cards(DeckManager* dm, const Card* out_selected[5]);
 void deck_remove_selected_from_hand(DeckManager* dm);
+void deck_sort_by_rank(DeckManager* dm);
+void deck_sort_by_suit(DeckManager* dm);
 
 #endif // DECK_H

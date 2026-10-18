@@ -1,9 +1,10 @@
 #include "platform/renderer_ds.h"
+#include "gfx/balatro_deck_gfx.h"
+#include "gfx/balatro_chips_gfx.h"
 #include <stdio.h>
 #include <string.h>
 
 // 5x7 ASCII bitmap font (characters 32 ' ' to 126 '~')
-// Each byte represents a column of 7 vertical pixels (bit 0 = top, bit 6 = bottom)
 static const uint8_t s_font5x7[95][5] = {
     {0x00,0x00,0x00,0x00,0x00}, // 32 ' '
     {0x00,0x00,0x5F,0x00,0x00}, // 33 '!'
@@ -43,7 +44,7 @@ static const uint8_t s_font5x7[95][5] = {
     {0x3E,0x41,0x41,0x41,0x22}, // 67 'C'
     {0x7F,0x41,0x41,0x22,0x1C}, // 68 'D'
     {0x7F,0x49,0x49,0x49,0x41}, // 69 'E'
-    {0x7F,0x09,0x09,0x09,0x01}, // 70 'F'
+    {0x7F,0x09,0x09,0x09,0x06}, // 70 'F'
     {0x3E,0x41,0x49,0x49,0x7A}, // 71 'G'
     {0x7F,0x08,0x08,0x08,0x7F}, // 72 'H'
     {0x00,0x41,0x7F,0x41,0x00}, // 73 'I'
@@ -102,47 +103,6 @@ static const uint8_t s_font5x7[95][5] = {
     {0x08,0x04,0x08,0x10,0x08}  // 126 '~'
 };
 
-// 7x7 Suit Pixel Icons (1 = colored pixel, 0 = transparent)
-static const uint8_t s_suit_heart[7] = {
-    0b0110110,
-    0b1111111,
-    0b1111111,
-    0b1111111,
-    0b0111110,
-    0b0011100,
-    0b0001000
-};
-
-static const uint8_t s_suit_diamond[7] = {
-    0b0001000,
-    0b0011100,
-    0b0111110,
-    0b1111111,
-    0b0111110,
-    0b0011100,
-    0b0001000
-};
-
-static const uint8_t s_suit_spade[7] = {
-    0b0001000,
-    0b0011100,
-    0b0111110,
-    0b1111111,
-    0b1101011,
-    0b0001000,
-    0b0011100
-};
-
-static const uint8_t s_suit_club[7] = {
-    0b0011100,
-    0b0011100,
-    0b1101011,
-    0b1111111,
-    0b0101010,
-    0b0001000,
-    0b0011100
-};
-
 // -------------------------------------------------------------
 // Primitives
 // -------------------------------------------------------------
@@ -172,9 +132,7 @@ void draw_outline_rect(uint16_t* fb, int x, int y, int w, int h, uint16_t color)
 
 void draw_rounded_panel(uint16_t* fb, int x, int y, int w, int h, uint16_t fill_col, uint16_t border_col) {
     if (w < 4 || h < 4) return;
-    // Fill interior
     draw_fill_rect(fb, x + 1, y + 1, w - 2, h - 2, fill_col);
-    // Borders
     draw_fill_rect(fb, x + 1, y, w - 2, 1, border_col);         // Top
     draw_fill_rect(fb, x + 1, y + h - 1, w - 2, 1, border_col); // Bottom
     draw_fill_rect(fb, x, y + 1, 1, h - 2, border_col);         // Left
@@ -209,7 +167,7 @@ void draw_string(uint16_t* fb, int x, int y, const char* str, uint16_t text_col)
             y += 8;
         } else {
             draw_char(fb, cur_x, y, *str, text_col);
-            cur_x += 6; // 5 pixels char + 1 pixel spacing
+            cur_x += 6;
         }
         str++;
     }
@@ -220,194 +178,261 @@ void draw_string_shadow(uint16_t* fb, int x, int y, const char* str, uint16_t te
     draw_string(fb, x, y, str, text_col);
 }
 
-// Draw 7x7 suit pip
-static void draw_suit_icon(uint16_t* fb, int x, int y, CardSuit suit) {
-    const uint8_t* pattern = NULL;
-    uint16_t col = COLOR_HEART_RED;
+// 2x Scaled Bold Font for Balatro Numbers & Badges
+void draw_char_2x(uint16_t* fb, int x, int y, char c, uint16_t text_col) {
+    if (c < 32 || c > 126) c = '?';
+    int idx = c - 32;
 
-    switch (suit) {
-        case SUIT_HEARTS:
-            pattern = s_suit_heart;
-            col = COLOR_HEART_RED;
-            break;
-        case SUIT_DIAMONDS:
-            pattern = s_suit_diamond;
-            col = COLOR_DIAMOND_ORANGE;
-            break;
-        case SUIT_SPADES:
-            pattern = s_suit_spade;
-            col = COLOR_SPADE_BLACK;
-            break;
-        case SUIT_CLUBS:
-            pattern = s_suit_club;
-            col = COLOR_CLUB_BLACK;
-            break;
-        default:
-            return;
-    }
-
-    for (int r = 0; r < 7; ++r) {
-        int py = y + r;
-        if (py < 0 || py >= DS_SCREEN_H) continue;
-        uint8_t row_bits = pattern[r];
-        for (int c = 0; c < 7; ++c) {
-            int px = x + c;
-            if (px < 0 || px >= DS_SCREEN_W) continue;
-            if (row_bits & (1 << (6 - c))) {
-                fb[py * DS_SCREEN_W + px] = col;
+    for (int col = 0; col < 5; ++col) {
+        int px = x + col * 2;
+        if (px < 0 || px >= DS_SCREEN_W - 1) continue;
+        uint8_t line = s_font5x7[idx][col];
+        for (int row = 0; row < 7; ++row) {
+            int py = y + row * 2;
+            if (py >= 0 && py < DS_SCREEN_H - 1) {
+                if (line & (1 << row)) {
+                    fb[py * DS_SCREEN_W + px] = text_col;
+                    fb[py * DS_SCREEN_W + px + 1] = text_col;
+                    fb[(py + 1) * DS_SCREEN_W + px] = text_col;
+                    fb[(py + 1) * DS_SCREEN_W + px + 1] = text_col;
+                }
             }
         }
     }
 }
 
-// -------------------------------------------------------------
-// Card Rendering (Balatro Graphic Playing Card)
-// -------------------------------------------------------------
-
-static void draw_playing_card(uint16_t* fb, int x, int y, const Card* card) {
-    const int W = 26;
-    const int H = 38;
-
-    // Drop shadow
-    draw_fill_rect(fb, x + 2, y + 2, W, H, COLOR_CARD_SHADOW);
-
-    // Card background & border
-    uint16_t border_col = card->is_selected ? COLOR_CARD_SELECTED : COLOR_BOX_BORDER;
-    uint16_t bg_col = COLOR_CARD_WHITE;
-
-    if (card->enhancement == ENHANCEMENT_STONE) {
-        bg_col = COLOR_RGB(16, 16, 16); // Stone grey
-    } else if (card->enhancement == ENHANCEMENT_STEEL) {
-        bg_col = COLOR_RGB(22, 24, 26); // Steel metallic
-    } else if (card->enhancement == ENHANCEMENT_GLASS) {
-        bg_col = COLOR_RGB(25, 29, 31); // Glass tint
+void draw_string_2x(uint16_t* fb, int x, int y, const char* str, uint16_t text_col) {
+    if (!str) return;
+    int cur_x = x;
+    while (*str) {
+        draw_char_2x(fb, cur_x, y, *str, text_col);
+        cur_x += 12; // 10 pixels + 2 pixels spacing
+        str++;
     }
+}
 
-    draw_rounded_panel(fb, x, y, W, H, bg_col, border_col);
-
-    // Extra highlight border if selected
-    if (card->is_selected) {
-        draw_outline_rect(fb, x - 1, y - 1, W + 2, H + 2, COLOR_CARD_SELECTED);
-    }
-
-    if (card->enhancement == ENHANCEMENT_STONE) {
-        draw_string(fb, x + 3, y + 15, "+50", COLOR_TEXT_WHITE);
-        return;
-    }
-
-    // Rank text color (red for Hearts/Diamonds, dark for Spades/Clubs)
-    uint16_t font_col = (card->suit == SUIT_HEARTS || card->suit == SUIT_DIAMONDS)
-                        ? COLOR_HEART_RED : COLOR_SPADE_BLACK;
-
-    const char* r_str = card_rank_name(card->rank);
-    char buf[4];
-    if (card->rank == RANK_10) {
-        strcpy(buf, "10");
-    } else {
-        buf[0] = r_str[0];
-        buf[1] = '\0';
-    }
-
-    // Top-left rank
-    draw_string(fb, x + 2, y + 2, buf, font_col);
-
-    // Top-right mini suit
-    draw_suit_icon(fb, x + 16, y + 2, card->suit);
-
-    // Center big suit pip
-    draw_suit_icon(fb, x + 9, y + 16, card->suit);
-
-    // Bottom-right rank
-    draw_string(fb, x + 18, y + 28, buf, font_col);
+void draw_string_2x_shadow(uint16_t* fb, int x, int y, const char* str, uint16_t text_col, uint16_t shadow_col) {
+    draw_string_2x(fb, x + 1, y + 1, str, shadow_col);
+    draw_string_2x(fb, x, y, str, text_col);
 }
 
 // -------------------------------------------------------------
-// Top Screen Rendering (Status, Jokers, Blind Target, Chips x Mult)
+// Card Rendering (Authentic Balatro 8-Bit Pixel Art Playing Card)
+// -------------------------------------------------------------
+
+static void draw_playing_card(uint16_t* fb, int x, int y, const Card* card) {
+    // Drop shadow
+    draw_fill_rect(fb, x + 2, y + 2, BALATRO_CARD_W, BALATRO_CARD_H, COLOR_CARD_SHADOW);
+
+    int suit_row = 0;
+    if (card->suit == SUIT_HEARTS) suit_row = 0;
+    else if (card->suit == SUIT_CLUBS) suit_row = 1;
+    else if (card->suit == SUIT_DIAMONDS) suit_row = 2;
+    else if (card->suit == SUIT_SPADES) suit_row = 3;
+
+    int col = card->rank - 2;
+    if (col < 0) col = 0;
+    if (col > 12) col = 12;
+    int sprite_idx = suit_row * 13 + col;
+    const uint16_t* sprite = s_balatro_cards[sprite_idx];
+
+    // Blit authentic Balatro card sprite
+    for (int py = 0; py < BALATRO_CARD_H; ++py) {
+        int sy = y + py;
+        if (sy < 0 || sy >= DS_SCREEN_H) continue;
+        uint16_t* row_ptr = &fb[sy * DS_SCREEN_W];
+        for (int px = 0; px < BALATRO_CARD_W; ++px) {
+            int sx = x + px;
+            if (sx < 0 || sx >= DS_SCREEN_W) continue;
+            uint16_t color = sprite[py * BALATRO_CARD_W + px];
+            if (color != 0x0000) {
+                row_ptr[sx] = color;
+            }
+        }
+    }
+
+    // Glowing double border if selected
+    if (card->is_selected) {
+        draw_outline_rect(fb, x - 1, y - 1, BALATRO_CARD_W + 2, BALATRO_CARD_H + 2, COLOR_CARD_SELECTED);
+        draw_outline_rect(fb, x - 2, y - 2, BALATRO_CARD_W + 4, BALATRO_CARD_H + 4, COLOR_CARD_SELECTED);
+    }
+}
+
+// -------------------------------------------------------------
+// Top Screen Rendering (Status, Chips x Mult, Blind Chip, Jokers)
 // -------------------------------------------------------------
 
 void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
     if (!fb || !game) return;
 
-    // Fill table background
+    // Fill casino green felt background
     draw_fill_rect(fb, 0, 0, DS_SCREEN_W, DS_SCREEN_H, COLOR_TABLE_BG);
+    draw_outline_rect(fb, 1, 1, DS_SCREEN_W - 2, DS_SCREEN_H - 2, COLOR_TABLE_ACCENT);
 
-    // Subtle table felt border
-    draw_outline_rect(fb, 2, 2, DS_SCREEN_W - 4, DS_SCREEN_H - 4, COLOR_TABLE_ACCENT);
+    // If in Victory State, show Celebration Overlay!
+    if (game->current_state == STATE_ROUND_VICTORY) {
+        draw_rounded_panel(fb, 14, 18, 228, 156, COLOR_BOX_DARK, COLOR_GOLD_COIN);
+        draw_outline_rect(fb, 16, 20, 224, 152, COLOR_GOLD_COIN);
 
-    // Top Title
-    draw_rounded_panel(fb, 80, 4, 96, 14, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-    draw_string_shadow(fb, 94, 7, "* BALATRO *", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        draw_string_shadow(fb, 54, 30, "*** ROUND CLEARED! ***", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        draw_string_2x_shadow(fb, 76, 44, "VICTORY", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
-    // Ante & Blind Badges (Left top)
-    draw_rounded_panel(fb, 6, 22, 60, 16, COLOR_RGB(28, 12, 4), COLOR_DIAMOND_ORANGE);
-    char ante_str[16];
-    sprintf(ante_str, "ANTE %d/8", game->ante);
-    draw_string(fb, 10, 26, ante_str, COLOR_TEXT_WHITE);
+        char pay_str[32];
+        sprintf(pay_str, "CASH OUT: +$%d", game->round_payout);
+        draw_string_2x_shadow(fb, 42, 68, pay_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
 
-    draw_rounded_panel(fb, 70, 22, 78, 16, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-    const char* blind_name = (game->current_blind == BLIND_SMALL ? "SMALL BLIND" :
-                             (game->current_blind == BLIND_BIG   ? "BIG BLIND"   : "BOSS BLIND"));
-    draw_string(fb, 74, 26, blind_name, COLOR_GOLD_COIN);
+        int base_rew = (game->current_blind == BLIND_SMALL) ? 3 : (game->current_blind == BLIND_BIG ? 4 : 5);
+        char b1[48], b2[48], b3[48];
+        sprintf(b1, "Base Blind Payout:    +$%d", base_rew);
+        sprintf(b2, "Leftover Hands Bonus: +$%d", game->hands_left);
+        sprintf(b3, "Total Dollars:         $%d", game->dollars);
+        draw_string(fb, 36, 96, b1, COLOR_TEXT_WHITE);
+        draw_string(fb, 36, 108, b2, COLOR_TEXT_WHITE);
+        draw_string(fb, 36, 120, b3, COLOR_GOLD_COIN);
 
-    // Target Score Panel (Left middle)
-    draw_rounded_panel(fb, 6, 42, 142, 28, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-    draw_string(fb, 10, 45, "SCORE AT LEAST:", COLOR_RGB(18, 22, 20));
-    char goal_str[32];
-    sprintf(goal_str, "%lld PTS", (long long)game->target_score);
-    draw_string_shadow(fb, 10, 56, goal_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        draw_string_shadow(fb, 38, 148, "Tap [NEXT BLIND >>] on Bottom Screen", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        return;
+    }
 
-    // Round Progress / Current Score
-    draw_rounded_panel(fb, 6, 73, 142, 24, COLOR_RGB(3, 7, 5), COLOR_BOX_BORDER);
-    draw_string(fb, 10, 76, "ROUND SCORE:", COLOR_RGB(16, 20, 18));
-    char score_str[32];
-    sprintf(score_str, "%lld", (long long)game->current_round_score);
-    draw_string_shadow(fb, 80, 76, score_str, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+    // If in Game Over State, show Game Over Overlay!
+    if (game->current_state == STATE_GAME_OVER) {
+        draw_rounded_panel(fb, 14, 18, 228, 156, COLOR_BOX_DARK, COLOR_MULT_RED);
+        draw_outline_rect(fb, 16, 20, 224, 152, COLOR_MULT_RED);
 
-    // Jokers Tray (Right side: 5 slots)
-    draw_rounded_panel(fb, 152, 22, 98, 75, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-    draw_string(fb, 160, 25, "JOKERS (0-5)", COLOR_RGB(16, 22, 18));
+        draw_string_shadow(fb, 62, 30, "*** GAME OVER ***", COLOR_MULT_RED, COLOR_BOX_DARK);
+        draw_string_2x_shadow(fb, 66, 46, "DEFEATED", COLOR_MULT_RED, COLOR_BOX_DARK);
 
-    for (int i = 0; i < MAX_JOKERS_SLOTS; ++i) {
-        int jx = 156 + (i % 3) * 30;
-        int jy = 36 + (i / 3) * 28;
-        if (i < game->joker_count && game->jokers[i]) {
-            // Draw active joker mini card
-            draw_rounded_panel(fb, jx, jy, 26, 24, COLOR_RGB(28, 24, 18), COLOR_GOLD_COIN);
-            draw_string(fb, jx + 4, jy + 4, "JK", COLOR_MULT_RED);
-            char short_name[4];
-            strncpy(short_name, game->jokers[i]->name, 3);
-            short_name[3] = '\0';
-            draw_string(fb, jx + 3, jy + 14, short_name, COLOR_TEXT_BLACK);
-        } else {
-            // Empty dashed slot
-            draw_outline_rect(fb, jx, jy, 26, 24, COLOR_RGB(6, 12, 8));
+        draw_string(fb, 44, 72, "You ran out of hands to play!", COLOR_TEXT_WHITE);
+
+        char f_score[48];
+        sprintf(f_score, "Final: %lld  /  Goal: %lld", (long long)game->current_round_score, (long long)game->target_score);
+        draw_string(fb, 38, 92, f_score, COLOR_TEXT_WHITE);
+
+        char f_ante[32];
+        sprintf(f_ante, "Reached: Ante %d / 8", game->ante);
+        draw_string(fb, 64, 110, f_ante, COLOR_GOLD_COIN);
+
+        draw_string_shadow(fb, 38, 148, "Tap [RESTART RUN] on Bottom Screen", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        return;
+    }
+
+    // --- Active Round View ---
+    // Top Title Bar
+    draw_rounded_panel(fb, 76, 2, 104, 14, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+    draw_string_shadow(fb, 90, 5, "* BALATRO *", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+    // Authentic Blind Poker Chip (34x34) at (6, 20)
+    const uint16_t* chip_sprite = s_chip_small_blind;
+    if (game->current_blind == BLIND_BIG) chip_sprite = s_chip_big_blind;
+    else if (game->current_blind == BLIND_BOSS) chip_sprite = s_chip_boss_blind;
+
+    for (int py = 0; py < BALATRO_CHIP_SIZE; ++py) {
+        int sy = 20 + py;
+        if (sy < 0 || sy >= DS_SCREEN_H) continue;
+        uint16_t* row_ptr = &fb[sy * DS_SCREEN_W];
+        for (int px = 0; px < BALATRO_CHIP_SIZE; ++px) {
+            int sx = 8 + px;
+            if (sx < 0 || sx >= DS_SCREEN_W) continue;
+            uint16_t color = chip_sprite[py * BALATRO_CHIP_SIZE + px];
+            if (color != 0x0000) {
+                row_ptr[sx] = color;
+            }
         }
     }
 
-    // Iconic Chips & Mult Calculator Box (Balatro Signature)
-    draw_rounded_panel(fb, 6, 102, 244, 46, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+    // Ante & Blind Badges
+    draw_rounded_panel(fb, 46, 20, 54, 14, COLOR_RGB(28, 12, 4), COLOR_DIAMOND_ORANGE);
+    char ante_str[16];
+    sprintf(ante_str, "ANTE %d/8", game->ante);
+    draw_string(fb, 50, 23, ante_str, COLOR_TEXT_WHITE);
 
-    // Blue Chips Box
-    draw_rounded_panel(fb, 12, 108, 90, 34, COLOR_CHIPS_BLUE, COLOR_RGB(8, 22, 31));
-    draw_string(fb, 18, 112, "CHIPS", COLOR_RGB(18, 24, 31));
+    const char* b_title = (game->current_blind == BLIND_SMALL ? "SMALL BLIND" :
+                          (game->current_blind == BLIND_BIG   ? "BIG BLIND"   : "BOSS BLIND"));
+    draw_string_shadow(fb, 48, 38, b_title, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+    int reward_dollars = (game->current_blind == BLIND_SMALL) ? 3 : (game->current_blind == BLIND_BIG ? 4 : 5);
+    char rew_str[16];
+    sprintf(rew_str, "Reward: +$%d", reward_dollars);
+    draw_string(fb, 48, 48, rew_str, COLOR_RGB(16, 24, 18));
+
+    // Target Score Panel
+    draw_rounded_panel(fb, 144, 18, 106, 38, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+    draw_string(fb, 150, 22, "SCORE AT LEAST:", COLOR_RGB(16, 22, 18));
+    char goal_str[32];
+    sprintf(goal_str, "%lld", (long long)game->target_score);
+    draw_string_2x_shadow(fb, 152, 33, goal_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+    // Round Progress / Current Score
+    draw_rounded_panel(fb, 8, 58, 240, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+    draw_string(fb, 14, 64, "ROUND SCORE:", COLOR_RGB(16, 20, 18));
+    char score_str[32];
+    sprintf(score_str, "%lld / %lld", (long long)game->current_round_score, (long long)game->target_score);
+    draw_string_shadow(fb, 94, 64, score_str, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+
+    // Subtle Progress Gauge inside score bar
+    if (game->target_score > 0) {
+        int bar_w = (int)((game->current_round_score * 50) / game->target_score);
+        if (bar_w > 50) bar_w = 50;
+        if (bar_w > 0) {
+            draw_fill_rect(fb, 194, 63, bar_w, 10, COLOR_GOLD_COIN);
+        }
+        draw_outline_rect(fb, 193, 62, 52, 12, COLOR_BOX_BORDER);
+    }
+
+    // Jokers Tray (5 mini card slots)
+    // Displayed in a neat row if any are equipped
+    // (Jokers are drawn if equipped)
+
+    // Iconic Chips & Mult Calculator Box
+    draw_rounded_panel(fb, 6, 82, 244, 82, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+
+    // Determine values to show: Live Selection Preview if cards selected, else last scored hand
+    int64_t disp_chips = 0;
+    double disp_mult = 1.0;
+    const char* hand_display_name = "SELECT 1-5 CARDS";
+    bool is_previewing = false;
+
+    if (game->preview_eval.type != HAND_NONE) {
+        disp_chips = game->preview_score.chips;
+        disp_mult = game->preview_score.mult;
+        hand_display_name = poker_hand_name(game->preview_eval.type);
+        is_previewing = true;
+    } else if (game->last_score.final_score > 0) {
+        disp_chips = game->last_score.chips;
+        disp_mult = game->last_score.mult;
+        hand_display_name = poker_hand_name(game->last_eval.type);
+    }
+
+    // Blue Chips Box (Left)
+    draw_rounded_panel(fb, 12, 88, 98, 44, COLOR_CHIPS_BLUE, COLOR_RGB(8, 24, 31));
+    draw_outline_rect(fb, 13, 89, 96, 42, COLOR_RGB(16, 26, 31));
+    draw_string(fb, 18, 92, "CHIPS", COLOR_RGB(18, 26, 31));
     char chips_val[16];
-    sprintf(chips_val, "%lld", (long long)game->last_score.chips);
-    draw_string_shadow(fb, 18, 124, chips_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+    sprintf(chips_val, "%lld", (long long)disp_chips);
+    draw_string_2x_shadow(fb, 22, 106, chips_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
-    // Center X multiplication sign
-    draw_string_shadow(fb, 108, 120, "X", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+    // Center Gold "X" multiplication sign
+    draw_string_2x_shadow(fb, 118, 102, "X", COLOR_GOLD_COIN, COLOR_BOX_DARK);
 
-    // Red Mult Box
-    draw_rounded_panel(fb, 122, 108, 90, 34, COLOR_MULT_RED, COLOR_RGB(31, 10, 12));
-    draw_string(fb, 128, 112, "MULT", COLOR_RGB(31, 20, 22));
+    // Red Mult Box (Right)
+    draw_rounded_panel(fb, 146, 88, 98, 44, COLOR_MULT_RED, COLOR_RGB(31, 10, 12));
+    draw_outline_rect(fb, 147, 89, 96, 42, COLOR_RGB(31, 18, 20));
+    draw_string(fb, 152, 92, "MULT", COLOR_RGB(31, 22, 24));
     char mult_val[16];
-    sprintf(mult_val, "%.1f", game->last_score.mult);
-    draw_string_shadow(fb, 128, 124, mult_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+    sprintf(mult_val, "%.1f", disp_mult);
+    draw_string_2x_shadow(fb, 156, 106, mult_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
-    // Hand Played Name Badge
-    if (game->last_eval.type != HAND_NONE) {
-        const char* hname = poker_hand_name(game->last_eval.type);
-        draw_string_shadow(fb, 10, 153, hname, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+    // Hand Name Badge (Shows live detected poker hand name!)
+    uint16_t h_col = is_previewing ? COLOR_GOLD_COIN : COLOR_RGB(14, 20, 16);
+    draw_string_shadow(fb, 14, 138, hand_display_name, h_col, COLOR_BOX_DARK);
+
+    if (is_previewing) {
+        char est_str[32];
+        int64_t est_total = (int64_t)(disp_chips * disp_mult);
+        sprintf(est_str, "EST: %lld PTS", (long long)est_total);
+        draw_string_shadow(fb, 140, 138, est_str, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+    } else {
+        draw_string(fb, 140, 138, "Max 5 cards", COLOR_RGB(12, 16, 14));
     }
 
     // Bottom Stats Bar (Money, Hands, Discards)
@@ -436,38 +461,86 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
 
     // Rich Green Felt Table Background
     draw_fill_rect(fb, 0, 0, DS_SCREEN_W, DS_SCREEN_H, COLOR_TABLE_BG);
-    draw_outline_rect(fb, 2, 2, DS_SCREEN_W - 4, DS_SCREEN_H - 4, COLOR_TABLE_ACCENT);
+    draw_outline_rect(fb, 1, 1, DS_SCREEN_W - 2, DS_SCREEN_H - 2, COLOR_TABLE_ACCENT);
 
-    // Header label
-    draw_string(fb, 48, 10, "--- TAP CARDS TO SELECT ---", COLOR_RGB(12, 22, 16));
+    // If Victory State: Show Big [NEXT BLIND >>] Button
+    if (game->current_state == STATE_ROUND_VICTORY) {
+        draw_rounded_panel(fb, 24, 130, 208, 52, COLOR_RGB(4, 26, 10), COLOR_GOLD_COIN);
+        draw_outline_rect(fb, 26, 132, 204, 48, COLOR_GOLD_COIN);
+        draw_string_2x_shadow(fb, 48, 146, "NEXT BLIND >>", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        return;
+    }
 
-    // Draw the 8 Cards in Hand spread out horizontally
-    // Screen width = 256. Card width = 26.
-    // 8 cards spaced by 30 px = 240 px total span. Start at x = 8.
+    // If Game Over State: Show Big [RESTART RUN] Button
+    if (game->current_state == STATE_GAME_OVER) {
+        draw_rounded_panel(fb, 24, 130, 208, 52, COLOR_RGB(28, 6, 6), COLOR_GOLD_COIN);
+        draw_outline_rect(fb, 26, 132, 204, 48, COLOR_GOLD_COIN);
+        draw_string_2x_shadow(fb, 52, 146, "RESTART RUN", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        return;
+    }
+
+    // Active Round Controls:
+    // Sort Buttons
+    draw_rounded_panel(fb, 8, 6, 82, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+    draw_string(fb, 14, 11, "SORT: RANK", COLOR_TEXT_WHITE);
+
+    draw_rounded_panel(fb, 96, 6, 82, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+    draw_string(fb, 102, 11, "SORT: SUIT", COLOR_TEXT_WHITE);
+
+    // Hand card count badge
+    char hand_count_str[16];
+    sprintf(hand_count_str, "HAND %d/%d", game->deck.hand.count, game->deck.hand_size_limit);
+    draw_string(fb, 188, 11, hand_count_str, COLOR_RGB(16, 22, 18));
+
+    // Draw Authentic Balatro Cards spread out horizontally
     int start_x = 8;
     int base_y = 66;
 
     for (int i = 0; i < game->deck.hand.count; ++i) {
         int cx = start_x + (i * 30);
-        // If selected, card LIFTS UP by 12 pixels just like Balatro!
-        int cy = game->deck.hand.cards[i].is_selected ? (base_y - 12) : base_y;
+        // If selected, card LIFTS UP by 14 pixels
+        int cy = game->deck.hand.cards[i].is_selected ? (base_y - 14) : base_y;
 
         draw_playing_card(fb, cx, cy, &game->deck.hand.cards[i]);
 
         // Draw card index number below
         char num_buf[4];
         sprintf(num_buf, "%d", i + 1);
-        draw_string(fb, cx + 10, base_y + 42, num_buf, COLOR_RGB(10, 18, 14));
+        uint16_t num_col = game->deck.hand.cards[i].is_selected ? COLOR_CARD_SELECTED : COLOR_RGB(10, 18, 14);
+        draw_string(fb, cx + 10, base_y + 40, num_buf, num_col);
     }
 
-    // Touch Action Buttons (Bottom area)
+    // Bottom Touch Action Buttons
+    const Card* sel_cards[5];
+    int sel_count = deck_get_selected_cards((DeckManager*)&game->deck, sel_cards);
+
     // PLAY HAND Button (Big Blue)
-    draw_rounded_panel(fb, 16, 138, 108, 42, COLOR_PLAY_BTN, COLOR_RGB(10, 24, 31));
-    draw_outline_rect(fb, 17, 139, 106, 40, COLOR_CHIPS_BLUE);
-    draw_string_shadow(fb, 30, 154, "PLAY HAND", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+    uint16_t play_bg = (sel_count > 0) ? COLOR_PLAY_BTN : COLOR_RGB(2, 8, 14);
+    draw_rounded_panel(fb, 12, 136, 112, 44, play_bg, COLOR_RGB(10, 24, 31));
+    draw_outline_rect(fb, 13, 137, 110, 42, (sel_count > 0) ? COLOR_CHIPS_BLUE : COLOR_RGB(4, 12, 18));
+    if (sel_count > 0) {
+        draw_string_shadow(fb, 24, 148, "PLAY HAND", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        char est_pts[24];
+        int64_t est_total = (int64_t)(game->preview_score.chips * game->preview_score.mult);
+        sprintf(est_pts, "%lld PTS", (long long)est_total);
+        draw_string_shadow(fb, 24, 160, est_pts, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+    } else {
+        draw_string(fb, 18, 154, "SELECT CARDS", COLOR_RGB(12, 16, 18));
+    }
 
     // DISCARD Button (Big Red)
-    draw_rounded_panel(fb, 132, 138, 108, 42, COLOR_DISCARD_BTN, COLOR_RGB(31, 10, 12));
-    draw_outline_rect(fb, 133, 139, 106, 40, COLOR_MULT_RED);
-    draw_string_shadow(fb, 154, 154, "DISCARD", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+    bool can_discard = (game->discards_left > 0 && sel_count > 0);
+    uint16_t disc_bg = can_discard ? COLOR_DISCARD_BTN : COLOR_RGB(14, 3, 4);
+    draw_rounded_panel(fb, 132, 136, 112, 44, disc_bg, COLOR_RGB(31, 10, 12));
+    draw_outline_rect(fb, 133, 137, 110, 42, can_discard ? COLOR_MULT_RED : COLOR_RGB(18, 4, 6));
+    if (game->discards_left <= 0) {
+        draw_string(fb, 142, 154, "NO DISCARDS", COLOR_RGB(18, 10, 10));
+    } else if (sel_count > 0) {
+        draw_string_shadow(fb, 156, 148, "DISCARD", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        char disc_left[24];
+        sprintf(disc_left, "(%d LEFT)", game->discards_left);
+        draw_string_shadow(fb, 156, 160, disc_left, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+    } else {
+        draw_string(fb, 156, 154, "DISCARD", COLOR_RGB(16, 12, 12));
+    }
 }
