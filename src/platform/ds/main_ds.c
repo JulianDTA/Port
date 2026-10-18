@@ -12,7 +12,6 @@
 static PrintConsole s_top_console;
 static PrintConsole s_bottom_console;
 static touchPosition s_touch;
-static bool s_was_touching = false;
 
 void hal_init(void) {
     // Set 2D video mode on both main (top) and sub (bottom) engines

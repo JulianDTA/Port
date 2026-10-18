@@ -4,8 +4,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifndef SCREEN_WIDTH
 #define SCREEN_WIDTH  256
+#endif
+#ifndef SCREEN_HEIGHT
 #define SCREEN_HEIGHT 192
+#endif
 
 typedef struct {
     int touch_x;
