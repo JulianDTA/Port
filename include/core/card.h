@@ -74,6 +74,12 @@ void card_init(Card* card, uint8_t id, CardSuit suit, CardRank rank);
 int32_t card_get_base_chips(const Card* card);
 const char* card_suit_name(CardSuit suit);
 const char* card_rank_name(CardRank rank);
+const char* card_get_enhancement_name(CardEnhancement enhancement);
+const char* card_get_enhancement_description(CardEnhancement enhancement);
+const char* card_get_edition_name(CardEdition edition);
+const char* card_get_edition_description(CardEdition edition);
+const char* card_get_seal_name(CardSeal seal);
+const char* card_get_seal_description(CardSeal seal);
 
 static inline bool card_is_face(const Card* card) {
     if (!card) return false;

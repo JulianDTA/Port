@@ -57,6 +57,9 @@ typedef struct {
     int pack_choice_count;
     ShopSlot pack_cards[3]; // The 3 cards revealed inside the pack
     bool show_inventory;    // When true, displays inventory sell screen
+    int selected_shop_item; // 0=Slot 0, 1=Slot 1, 2=Booster Pack, 3=Voucher
+    int sell_inspect_idx;   // Index of owned joker/consumable selected in sell screen (-1=none, 0..4=Joker, 5..6=Consumable)
+    int pack_inspect_idx;   // Index of card in pack currently inspected (0..2)
 } ShopState;
 
 void shop_generate(ShopState* shop, uint32_t seed, int ante);
@@ -65,5 +68,9 @@ bool shop_buy_pack(GameSession* game);
 bool shop_choose_pack_card(GameSession* game, int card_index);
 bool shop_buy_voucher(GameSession* game);
 bool shop_reroll(GameSession* game);
+const char* shop_get_voucher_name(VoucherId id);
+const char* shop_get_voucher_description(VoucherId id);
+const char* shop_get_pack_name(PackType type);
+const char* shop_get_pack_description(PackType type);
 
 #endif // SHOP_H

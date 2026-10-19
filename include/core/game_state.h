@@ -72,6 +72,10 @@ typedef struct GameSession {
     ScoreState preview_score;
     int round_payout;
 
+    // Active round Joker Inspector & Management
+    bool inspecting_jokers;
+    int inspected_joker_idx;
+
     uint32_t rng_state;
 } GameSession;
 
@@ -86,6 +90,7 @@ void game_advance_to_shop(GameSession* game);
 void game_advance_next_blind(GameSession* game);
 bool game_sell_joker(GameSession* game, int joker_index);
 bool game_sell_consumable(GameSession* game, int consumable_index);
+bool game_swap_jokers(GameSession* game, int idx1, int idx2);
 void game_tick_scoring(GameSession* game);
 void game_finish_scoring(GameSession* game);
 

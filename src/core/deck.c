@@ -69,35 +69,55 @@ int deck_get_selected_cards(DeckManager* dm, const Card* out_selected[5]) {
 
 void deck_discard_selected(DeckManager* dm) {
     if (!dm) return;
-    int new_hand_count = 0;
-    for (int i = 0; i < dm->hand.count; ++i) {
+    int write_idx = 0;
+    int original_count = dm->hand.count;
+    for (int i = 0; i < original_count; ++i) {
         if (dm->hand.cards[i].is_selected) {
             dm->hand.cards[i].is_selected = false;
             if (dm->discard_pile.count < MAX_DECK_SIZE) {
                 dm->discard_pile.cards[dm->discard_pile.count++] = dm->hand.cards[i];
             }
+            // In-place replacement: draw directly into this exact slot if cards remain
+            if (dm->draw_pile.count > 0) {
+                Card replacement = dm->draw_pile.cards[--dm->draw_pile.count];
+                replacement.is_selected = false;
+                dm->hand.cards[write_idx++] = replacement;
+            }
         } else {
-            dm->hand.cards[new_hand_count++] = dm->hand.cards[i];
+            if (write_idx != i) {
+                dm->hand.cards[write_idx] = dm->hand.cards[i];
+            }
+            write_idx++;
         }
     }
-    dm->hand.count = new_hand_count;
+    dm->hand.count = write_idx;
 }
 
 void deck_remove_selected_from_hand(DeckManager* dm) {
     if (!dm) return;
-    int new_hand_count = 0;
-    for (int i = 0; i < dm->hand.count; ++i) {
+    int write_idx = 0;
+    int original_count = dm->hand.count;
+    for (int i = 0; i < original_count; ++i) {
         if (dm->hand.cards[i].is_selected) {
             dm->hand.cards[i].is_selected = false;
             // Played cards go to discard pile after scoring
             if (dm->discard_pile.count < MAX_DECK_SIZE) {
                 dm->discard_pile.cards[dm->discard_pile.count++] = dm->hand.cards[i];
             }
+            // In-place replacement: draw directly into this exact slot if cards remain
+            if (dm->draw_pile.count > 0) {
+                Card replacement = dm->draw_pile.cards[--dm->draw_pile.count];
+                replacement.is_selected = false;
+                dm->hand.cards[write_idx++] = replacement;
+            }
         } else {
-            dm->hand.cards[new_hand_count++] = dm->hand.cards[i];
+            if (write_idx != i) {
+                dm->hand.cards[write_idx] = dm->hand.cards[i];
+            }
+            write_idx++;
         }
     }
-    dm->hand.count = new_hand_count;
+    dm->hand.count = write_idx;
 }
 
 static int cmp_card_rank(const void* a, const void* b) {

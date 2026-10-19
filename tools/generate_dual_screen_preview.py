@@ -238,6 +238,18 @@ class ScreenCanvas:
         self.draw_string_2x(x + 1, y + 1, s, sh_col)
         self.draw_string_2x(x, y, s, col)
 
+    def draw_string_wrapped(self, x, y, max_w, s, col):
+        cur_x = x
+        cur_y = y
+        words = s.split(" ")
+        for w in words:
+            word_w = len(w) * 6
+            if cur_x > x and (cur_x + word_w) > (x + max_w):
+                cur_x = x
+                cur_y += 9
+            self.draw_string(cur_x, cur_y, w, col)
+            cur_x += word_w + 6
+
     def blit_sprite(self, x, y, w, h, data, debuffed=False, selected=False):
         # Drop shadow
         self.draw_fill_rect(x + 2, y + 2, w, h, COLOR_CARD_SHADOW)
@@ -348,17 +360,15 @@ def render_bottom_screen_active():
     cv.draw_string(4, 25, "The Fool", COLOR_GOLD_COIN)
     cv.draw_string(4, 34, "Instant use", COLOR_TEXT_WHITE)
 
-    # [USE CARD]
-    cv.draw_rounded_panel(186, 2, 66, 18, col_rgb(4, 24, 8), COLOR_GOLD_COIN)
-    cv.draw_string(192, 7, "USE CARD", COLOR_TEXT_WHITE)
-
-    # [SELL $1]
-    cv.draw_rounded_panel(186, 22, 66, 18, col_rgb(24, 4, 6), COLOR_MULT_RED)
-    cv.draw_string(196, 27, "SELL $1", COLOR_TEXT_WHITE)
+    # Interactive Jokers Inspector Button
+    cv.draw_rounded_panel(178, 2, 74, 18, COLOR_BOX_DARK, COLOR_GOLD_COIN)
+    cv.draw_string(182, 7, "JOKERS: 3/5", COLOR_GOLD_COIN)
+    cv.draw_rounded_panel(178, 22, 74, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string(186, 27, "[INSPECT]", COLOR_TEXT_WHITE)
 
     # Hand cards (8 cards, centered)
     # 5 selected cards (Hearts: 2, 4, 7, 10, Ace)
-    hand_cards_idx = [0, 2, 5, 8, 12, 14, 28, 41] # Hearts & other suits
+    hand_cards_idx = [0, 2, 5, 8, 12, 14, 28, 41]
     selected_mask =  [True, True, True, True, True, False, False, False]
     base_y = 74
     total_w = 8 * 31 - 3
@@ -389,171 +399,432 @@ def render_bottom_screen_active():
 
     return cv.img
 
+def render_bottom_screen_joker_inspector():
+    cv = ScreenCanvas()
+    # Top Bar
+    cv.draw_rounded_panel(4, 3, 98, 20, col_rgb(4, 26, 12), COLOR_GOLD_COIN)
+    cv.draw_string(8, 8, "< BACK TO HAND", COLOR_GOLD_COIN)
+    cv.draw_string_shadow(108, 8, "JOKER INSPECTOR", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_string(218, 8, "(3/5)", COLOR_GOLD_COIN)
+
+    # 5 Joker Slots across the top
+    for j in range(5):
+        jx = 4 + j * 50
+        jy = 26
+        is_sel = (j == 0) # Inspecting Joker 0 (Baron)
+        b_col = COLOR_GOLD_COIN if is_sel else COLOR_BOX_BORDER
+        cv.draw_rounded_panel(jx, jy, 48, 48, COLOR_BOX_DARK, b_col)
+        if j < 3:
+            cv.blit_sprite(jx + 11, jy + 2, 26, 36, jokers_gfx[j * 4])
+            names = ["Baron", "Greedy", "Cavend"]
+            cv.draw_string(jx + 4, jy + 38, names[j], COLOR_GOLD_COIN if is_sel else COLOR_TEXT_WHITE)
+        else:
+            cv.draw_string(jx + 8, jy + 18, "(EMPTY)", col_rgb(8, 14, 10))
+
+    # Selected Joker Detailed Info Panel
+    cv.draw_rounded_panel(4, 78, 248, 76, COLOR_BOX_DARK, COLOR_GOLD_COIN)
+    cv.draw_string_shadow(10, 82, "Baron", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(116, 82, "RARE", COLOR_MULT_RED)
+    cv.draw_string(180, 82, "HOLO (+10M)", COLOR_MULT_RED)
+    cv.draw_string_wrapped(10, 94, 236, "Each King held in hand gives x1.5 Mult.", COLOR_TEXT_WHITE)
+    cv.draw_string(10, 140, "Position 1/5  |  Sell: $4", col_rgb(18, 24, 20))
+
+    # Reorder buttons
+    cv.draw_rounded_panel(4, 158, 76, 28, col_rgb(6, 6, 6), COLOR_BOX_BORDER)
+    cv.draw_string(10, 167, "< MOVE L", col_rgb(14, 14, 14))
+
+    cv.draw_rounded_panel(84, 158, 76, 28, col_rgb(6, 18, 28), COLOR_CHIPS_BLUE)
+    cv.draw_string(92, 167, "MOVE R >", COLOR_TEXT_WHITE)
+
+    cv.draw_rounded_panel(164, 158, 88, 28, col_rgb(4, 26, 12), COLOR_GOLD_COIN)
+    cv.draw_string(170, 167, "< BACK (B)", COLOR_GOLD_COIN)
+    return cv.img
+
 def combine_dual_screen(top_img, bottom_img):
-    # DS Frame with hinge
     canvas = Image.new("RGB", (DS_W + 16, DS_H * 2 + 32), (20, 20, 24))
     d = ImageDraw.Draw(canvas)
-    # Bezel borders
     d.rectangle([6, 6, DS_W + 9, DS_H + 9], outline=(45, 45, 52), width=2)
     d.rectangle([6, DS_H + 22, DS_W + 9, DS_H * 2 + 25], outline=(45, 45, 52), width=2)
-    # Paste screens
     canvas.paste(top_img, (8, 8))
     canvas.paste(bottom_img, (8, DS_H + 24))
     return canvas
 
 def render_top_screen_shop():
     cv = ScreenCanvas()
-    cv.draw_rounded_panel(70, 2, 116, 16, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-    cv.draw_string_shadow(80, 5, "* BALATRO SHOP *", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    # Top Header
+    cv.draw_rounded_panel(6, 2, 244, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string_shadow(12, 7, "$15 CASH", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string_shadow(88, 7, "* BALATRO SHOP *", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_string(200, 7, "ANTE 1/8", COLOR_DIAMOND_ORANGE)
 
-    # Money Badge
-    cv.draw_rounded_panel(8, 22, 94, 24, col_rgb(24, 18, 4), COLOR_GOLD_COIN)
-    cv.draw_string_shadow(16, 30, "$15 CASH", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    # Active Item Showcase Panel (Showcasing Slot 0 Joker: Baron)
+    cv.draw_rounded_panel(6, 26, 244, 100, COLOR_BOX_DARK, COLOR_GOLD_COIN)
+    cv.draw_string(12, 30, "[SHOP JOKER EFFECT]", COLOR_GOLD_COIN)
+    cv.blit_sprite(14, 44, 26, 36, jokers_gfx[0])
+    cv.draw_string_shadow(46, 44, "Baron", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(46, 56, "RARE", COLOR_MULT_RED)
+    cv.draw_string(116, 56, "Cost: $8  |  Sell: $4", COLOR_TEXT_WHITE)
+    cv.draw_string_wrapped(46, 70, 198, "Each King held in hand gives x1.5 Mult.", COLOR_TEXT_WHITE)
+    cv.draw_string(46, 112, "Passive scoring & multiplier bonus.", col_rgb(16, 24, 18))
 
-    # Jokers Info
-    cv.draw_string(114, 24, "JOKERS: 3/5", COLOR_TEXT_WHITE)
-    cv.draw_string(114, 36, "CONSUMABLES: 1/2", COLOR_TEXT_WHITE)
-
-    # Draw Owned Jokers in a neat row
-    for i in range(5):
-        jx = 8 + i * 49
-        jy = 54
-        if i < 3:
-            cv.blit_sprite(jx, jy, 26, 36, jokers_gfx[i * 4])
-            cv.draw_string(jx, jy + 38, ["Joker", "Greedy", "Cavend"][i], COLOR_TEXT_WHITE)
+    # Current Inventory Row
+    cv.draw_rounded_panel(6, 130, 244, 58, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string(12, 133, "OWNED: Jokers (3/5)  Items (1/2)", col_rgb(18, 26, 20))
+    for j in range(5):
+        jx = 10 + j * 32
+        jy = 146
+        if j < 3:
+            cv.blit_sprite(jx + 3, jy + 1, 26, 36, jokers_gfx[j * 4])
         else:
-            cv.draw_rounded_panel(jx, jy, 26, 36, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-            cv.draw_string(jx + 8, jy + 14, "+", col_rgb(8, 14, 10))
+            cv.draw_rounded_panel(jx, jy, 26, 38, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+            cv.draw_string(jx + 8, jy + 15, "+", col_rgb(8, 14, 10))
 
-    # Draw Owned Consumables
     for c in range(2):
-        cx = 156 + c * 46
-        cy = 114
+        cx = 178 + c * 34
+        cy = 146
         if c == 0:
-            cv.blit_sprite(cx, cy, 26, 36, cons_gfx[22]) # Mercury
-            cv.draw_string(cx, cy + 38, "Mercury", COLOR_GOLD_COIN)
+            cv.blit_sprite(cx + 4, cy + 1, 26, 36, cons_gfx[22]) # Mercury
         else:
-            cv.draw_rounded_panel(cx, cy, 26, 36, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-            cv.draw_string(cx + 8, cy + 14, "T", col_rgb(8, 14, 10))
+            cv.draw_rounded_panel(cx, cy, 26, 38, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+            cv.draw_string(cx + 8, cy + 15, "T", col_rgb(8, 14, 10))
 
-    cv.draw_string(14, 168, "Manage or inspect your deck & inventory", col_rgb(16, 22, 18))
     return cv.img
 
 def render_bottom_screen_shop():
     cv = ScreenCanvas()
-    # Slot 0 (Joker: Gros Michel)
-    s0_x = 8
-    s0_y = 10
-    cv.draw_rounded_panel(s0_x, s0_y, 70, 78, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-    cv.blit_sprite(s0_x + 22, s0_y + 6, 26, 36, jokers_gfx[12]) # Gros Michel
-    cv.draw_string(s0_x + 4, s0_y + 46, "Gros Michel", COLOR_TEXT_WHITE)
-    cv.draw_rounded_panel(s0_x + 4, s0_y + 58, 62, 16, col_rgb(4, 18, 8), COLOR_GOLD_COIN)
-    cv.draw_string(s0_x + 8, s0_y + 62, "BUY: $5", COLOR_GOLD_COIN)
+    # Slot 0 (Joker: Baron) - Active Selected
+    s0_x = 6
+    s0_y = 6
+    cv.draw_rounded_panel(s0_x, s0_y, 76, 84, COLOR_BOX_DARK, COLOR_GOLD_COIN)
+    cv.blit_sprite(s0_x + 25, s0_y + 4, 26, 36, jokers_gfx[0])
+    cv.draw_string(s0_x + 3, s0_y + 42, "Baron", COLOR_GOLD_COIN)
+    cv.draw_string(s0_x + 3, s0_y + 52, "RARE", COLOR_MULT_RED)
+    cv.draw_rounded_panel(s0_x + 3, s0_y + 64, 70, 16, col_rgb(4, 20, 8), COLOR_GOLD_COIN)
+    cv.draw_string(s0_x + 12, s0_y + 68, "BUY: $8", COLOR_GOLD_COIN)
 
     # Slot 1 (Consumable: The Empress)
-    s1_x = 84
-    s1_y = 10
-    cv.draw_rounded_panel(s1_x, s1_y, 70, 78, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-    cv.blit_sprite(s1_x + 22, s1_y + 6, 26, 36, cons_gfx[3]) # Empress
-    cv.draw_string(s1_x + 4, s1_y + 46, "The Empress", COLOR_TEXT_WHITE)
-    cv.draw_rounded_panel(s1_x + 4, s1_y + 58, 62, 16, col_rgb(4, 18, 8), COLOR_GOLD_COIN)
-    cv.draw_string(s1_x + 8, s1_y + 62, "BUY: $3", COLOR_GOLD_COIN)
+    s1_x = 86
+    s1_y = 6
+    cv.draw_rounded_panel(s1_x, s1_y, 76, 84, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.blit_sprite(s1_x + 25, s1_y + 4, 26, 36, cons_gfx[3]) # Empress
+    cv.draw_string(s1_x + 3, s1_y + 42, "The Empress", COLOR_GOLD_COIN)
+    cv.draw_string(s1_x + 3, s1_y + 52, "Tarot Card", COLOR_TEXT_WHITE)
+    cv.draw_rounded_panel(s1_x + 3, s1_y + 64, 70, 16, col_rgb(4, 20, 8), COLOR_GOLD_COIN)
+    cv.draw_string(s1_x + 12, s1_y + 68, "BUY: $3", COLOR_GOLD_COIN)
 
     # Booster Pack Slot (Arcana)
-    sp_x = 160
-    sp_y = 10
-    cv.draw_rounded_panel(sp_x, sp_y, 88, 78, col_rgb(14, 8, 22), col_rgb(24, 12, 31))
-    cv.draw_string_shadow(sp_x + 8, sp_y + 8, "Arcana", COLOR_GOLD_COIN, COLOR_BOX_DARK)
-    cv.draw_string(sp_x + 8, sp_y + 22, "Booster Pack", COLOR_TEXT_WHITE)
-    cv.draw_rounded_panel(sp_x + 8, sp_y + 52, 72, 18, col_rgb(28, 16, 4), COLOR_GOLD_COIN)
-    cv.draw_string(sp_x + 14, sp_y + 56, "OPEN ($4)", COLOR_GOLD_COIN)
+    sp_x = 166
+    sp_y = 6
+    cv.draw_rounded_panel(sp_x, sp_y, 84, 84, col_rgb(14, 8, 22), col_rgb(24, 12, 31))
+    cv.draw_string_shadow(sp_x + 4, sp_y + 6, "Arcana Pack", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(sp_x + 4, sp_y + 18, "Booster Pack", COLOR_TEXT_WHITE)
+    cv.draw_string(sp_x + 4, sp_y + 34, "Pick 1 of 3", col_rgb(20, 28, 22))
+    cv.draw_rounded_panel(sp_x + 4, sp_y + 64, 76, 16, col_rgb(28, 16, 4), COLOR_GOLD_COIN)
+    cv.draw_string(sp_x + 10, sp_y + 68, "OPEN ($4)", COLOR_GOLD_COIN)
 
-    # Voucher Slot
-    sv_x = 8
+    # Voucher Slot (Grabber)
+    sv_x = 6
     sv_y = 94
-    cv.draw_rounded_panel(sv_x, sv_y, 146, 38, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-    cv.draw_string(sv_x + 6, sv_y + 5, "Voucher: Upgrade", COLOR_GOLD_COIN)
-    cv.draw_string(sv_x + 6, sv_y + 19, "BUY VOUCHER ($10)", COLOR_TEXT_WHITE)
+    cv.draw_rounded_panel(sv_x, sv_y, 156, 40, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string(sv_x + 6, sv_y + 4, "Voucher: Grabber", COLOR_GOLD_COIN)
+    cv.draw_string(sv_x + 6, sv_y + 15, "+1 permanent hand/round", COLOR_TEXT_WHITE)
+    cv.draw_string(sv_x + 6, sv_y + 27, "BUY VOUCHER ($10)", COLOR_GOLD_COIN)
 
     # Inventory / Sell Button
-    sinv_x = 160
+    sinv_x = 166
     sinv_y = 94
-    cv.draw_rounded_panel(sinv_x, sinv_y, 88, 38, col_rgb(24, 16, 4), COLOR_GOLD_COIN)
-    cv.draw_string_shadow(sinv_x + 12, sinv_y + 6, "INVENTORY", COLOR_GOLD_COIN, COLOR_BOX_DARK)
-    cv.draw_string_shadow(sinv_x + 8, sinv_y + 20, "[SELL ITEMS]", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_rounded_panel(sinv_x, sinv_y, 84, 40, col_rgb(24, 16, 4), COLOR_GOLD_COIN)
+    cv.draw_string_shadow(sinv_x + 10, sinv_y + 8, "INVENTORY", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string_shadow(sinv_x + 6, sinv_y + 22, "[SELL ITEMS]", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
 
     # Bottom Controls: REROLL and NEXT BLIND
-    cv.draw_rounded_panel(8, 140, 110, 44, col_rgb(24, 14, 4), COLOR_GOLD_COIN)
-    cv.draw_string_shadow(18, 156, "REROLL ($5)", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_rounded_panel(6, 138, 114, 48, col_rgb(24, 14, 4), COLOR_GOLD_COIN)
+    cv.draw_string_shadow(18, 154, "REROLL ($5)", COLOR_GOLD_COIN, COLOR_BOX_DARK)
 
-    cv.draw_rounded_panel(124, 140, 124, 44, col_rgb(4, 26, 10), COLOR_GOLD_COIN)
-    cv.draw_string_2x_shadow(134, 152, "NEXT BLIND", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_rounded_panel(126, 138, 124, 48, col_rgb(4, 26, 10), COLOR_GOLD_COIN)
+    cv.draw_string_2x_shadow(136, 152, "NEXT BLIND", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
 
     return cv.img
 
 def render_bottom_screen_shop_inv():
     cv = ScreenCanvas()
     # Top Bar
-    cv.draw_rounded_panel(6, 4, 96, 20, COLOR_BOX_DARK, COLOR_GOLD_COIN)
-    cv.draw_string(10, 9, "< BACK TO SHOP", COLOR_GOLD_COIN)
+    cv.draw_rounded_panel(4, 3, 96, 20, COLOR_BOX_DARK, COLOR_GOLD_COIN)
+    cv.draw_string(8, 8, "< BACK TO SHOP", COLOR_GOLD_COIN)
 
-    cv.draw_rounded_panel(108, 4, 86, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-    cv.draw_string_shadow(116, 9, "SELL ITEMS", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_rounded_panel(104, 3, 88, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string_shadow(110, 8, "SELL INVENTORY", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
 
-    cv.draw_rounded_panel(200, 4, 50, 20, col_rgb(24, 18, 4), COLOR_GOLD_COIN)
-    cv.draw_string_shadow(208, 9, "$15", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_rounded_panel(196, 3, 56, 20, col_rgb(24, 18, 4), COLOR_GOLD_COIN)
+    cv.draw_string_shadow(212, 8, "$15", COLOR_GOLD_COIN, COLOR_BOX_DARK)
 
-    # Owned Jokers (5 slots)
-    cv.draw_string(8, 28, "TAP A JOKER TO SELL:", col_rgb(18, 24, 18))
+    # Owned Jokers (5 slots across y = 26 to y = 74)
     for j in range(5):
         jx = 4 + j * 50
-        jy = 38
-        cv.draw_rounded_panel(jx, jy, 48, 52, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-
+        jy = 26
+        is_sel = (j == 0) # Selected Joker 0
+        cv.draw_rounded_panel(jx, jy, 48, 48, COLOR_BOX_DARK, COLOR_GOLD_COIN if is_sel else COLOR_BOX_BORDER)
         if j < 3:
             cv.blit_sprite(jx + 11, jy + 2, 26, 36, jokers_gfx[j * 4])
-            cv.draw_rounded_panel(jx + 3, jy + 36, 42, 13, col_rgb(26, 4, 6), COLOR_MULT_RED)
-            cv.draw_string(jx + 5, jy + 39, f"SELL ${[2, 3, 2][j]}", COLOR_TEXT_WHITE)
+            names = ["Baron", "Greedy", "Cavend"]
+            cv.draw_string(jx + 4, jy + 38, names[j], COLOR_GOLD_COIN if is_sel else COLOR_TEXT_WHITE)
         else:
-            cv.draw_string(jx + 18, jy + 20, "-", col_rgb(10, 16, 12))
+            cv.draw_string(jx + 8, jy + 18, "(EMPTY)", col_rgb(8, 14, 10))
 
-    # Owned Consumables (2 slots)
-    cv.draw_string(8, 96, "TAP A CONSUMABLE TO SELL:", col_rgb(18, 24, 18))
+    # Owned Consumables (2 slots at y = 76 to y = 114)
     for c in range(2):
-        cx = 8 + c * 124
-        cy = 106
-        cv.draw_rounded_panel(cx, cy, 116, 42, COLOR_BOX_DARK, COLOR_BOX_BORDER)
-
+        cx = 4 + c * 124
+        cy = 76
+        cv.draw_rounded_panel(cx, cy, 120, 38, COLOR_BOX_DARK, COLOR_BOX_BORDER)
         if c == 0:
-            cv.blit_sprite(cx + 4, cy + 3, 26, 36, cons_gfx[22]) # Mercury
-            cv.draw_string(cx + 34, cy + 6, "Mercury", COLOR_GOLD_COIN)
-            cv.draw_rounded_panel(cx + 34, cy + 20, 68, 16, col_rgb(26, 4, 6), COLOR_MULT_RED)
-            cv.draw_string(cx + 40, cy + 24, "SELL ($1)", COLOR_TEXT_WHITE)
+            cv.blit_sprite(cx + 4, cy + 2, 26, 36, cons_gfx[22]) # Mercury
+            cv.draw_string(cx + 34, cy + 4, "Mercury", COLOR_GOLD_COIN)
+            cv.draw_string(cx + 34, cy + 18, "Planet Card", COLOR_TEXT_WHITE)
         else:
-            cv.draw_string(cx + 38, cy + 16, "(EMPTY)", col_rgb(12, 16, 14))
+            cv.draw_string(cx + 38, cy + 14, "(EMPTY ITEM)", col_rgb(10, 16, 12))
 
-    # Return to Shop Button
-    cv.draw_rounded_panel(24, 154, 208, 32, col_rgb(4, 26, 10), COLOR_GOLD_COIN)
-    cv.draw_string_shadow(68, 164, "DONE - RETURN TO SHOP", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    # Bottom Details & Confirm Sell Panel (y = 116 to y = 188)
+    cv.draw_rounded_panel(4, 116, 248, 70, COLOR_BOX_DARK, COLOR_GOLD_COIN)
+    cv.draw_string_shadow(10, 120, "Baron", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(90, 120, "RARE", COLOR_CHIPS_BLUE)
+    cv.draw_string_wrapped(10, 132, 134, "Each King held in hand gives x1.5 Mult.", COLOR_TEXT_WHITE)
+
+    # Confirm Sell Button
+    cv.draw_rounded_panel(150, 122, 98, 58, col_rgb(28, 4, 6), COLOR_MULT_RED)
+    cv.draw_string(160, 130, "CONFIRM SELL", COLOR_TEXT_WHITE)
+    cv.draw_string_shadow(168, 148, "+$4 CASH", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(162, 164, "[TAP TO SELL]", COLOR_TEXT_WHITE)
+
+    return cv.img
+
+def render_top_screen_booster_open():
+    cv = ScreenCanvas()
+    # Header
+    cv.draw_rounded_panel(6, 2, 244, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string_shadow(12, 7, "$15 CASH", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string_shadow(76, 7, "* ARCANA PACK *", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_string(200, 7, "ANTE 2/8", COLOR_DIAMOND_ORANGE)
+
+    # Inspected Pack Card Showcase Panel (y = 26 to y = 126)
+    cv.draw_rounded_panel(6, 26, 244, 100, COLOR_BOX_DARK, COLOR_GOLD_COIN)
+    cv.draw_string(12, 30, "[PACK CARD 2 of 3 - INSPECT]", COLOR_GOLD_COIN)
+
+    # Inspected Card: The Magician (Tarot)
+    cv.blit_sprite(14, 44, 26, 36, cons_gfx[1])
+    cv.draw_string_shadow(46, 44, "The Magician", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(46, 56, "TAROT CARD", col_rgb(24, 12, 31))
+    cv.draw_string(126, 56, "Req: 1-2 cards", COLOR_TEXT_WHITE)
+    cv.draw_string_wrapped(46, 70, 198, "Converts up to 2 selected cards into Lucky Cards.", COLOR_TEXT_WHITE)
+    cv.draw_string(46, 112, "Tap [PICK (A)] or press (A) to add to inventory.", col_rgb(16, 24, 18))
+
+    # Current Inventory Row (y = 130 to y = 188)
+    cv.draw_rounded_panel(6, 130, 244, 58, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string(12, 133, "YOUR INVENTORY: Jokers (3/5)  Items (1/2)", col_rgb(18, 26, 20))
+    for j in range(5):
+        jx = 10 + j * 32
+        jy = 146
+        if j < 3:
+            cv.blit_sprite(jx + 3, jy + 1, 26, 36, jokers_gfx[j * 4])
+        else:
+            cv.draw_rounded_panel(jx, jy, 26, 38, col_rgb(2, 4, 3), COLOR_BOX_BORDER)
+            cv.draw_string(jx + 8, jy + 15, "+", col_rgb(8, 14, 10))
+
+    for c in range(2):
+        cx = 178 + c * 34
+        cy = 146
+        if c == 0:
+            cv.blit_sprite(cx + 4, cy + 1, 26, 36, cons_gfx[22]) # Mercury
+        else:
+            cv.draw_rounded_panel(cx, cy, 26, 38, col_rgb(2, 4, 3), COLOR_BOX_BORDER)
+            cv.draw_string(cx + 8, cy + 15, "T", col_rgb(8, 14, 10))
+
+    return cv.img
+
+def render_bottom_screen_booster_open():
+    cv = ScreenCanvas()
+    cv.draw_rounded_panel(8, 4, 240, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string_shadow(36, 9, "CHOOSE 1 CARD (DETAILS ON TOP)", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+
+    pack_names = ["The Fool", "The Magician", "The Empress"]
+    pack_types = ["Tarot Card", "Tarot Card", "Tarot Card"]
+    pack_icons = [0, 1, 2]
+
+    for i in range(3):
+        cx = 10 + i * 80
+        cy = 28
+        is_inspected = (i == 1) # Card 1 (The Magician) inspected
+        cv.draw_rounded_panel(cx, cy, 74, 112, COLOR_BOX_DARK, COLOR_GOLD_COIN if is_inspected else COLOR_BOX_BORDER)
+        if is_inspected:
+            cv.draw_outline_rect(cx + 1, cy + 1, 72, 110, COLOR_GOLD_COIN)
+
+        cv.blit_sprite(cx + 24, cy + 6, 26, 36, cons_gfx[pack_icons[i]], selected=is_inspected)
+        cv.draw_string(cx + 4, cy + 46, pack_names[i], COLOR_GOLD_COIN)
+        cv.draw_string(cx + 4, cy + 58, pack_types[i], COLOR_TEXT_WHITE)
+
+        b_col = col_rgb(4, 24, 8) if is_inspected else col_rgb(8, 8, 8)
+        b_border = COLOR_GOLD_COIN if is_inspected else COLOR_BOX_BORDER
+        cv.draw_rounded_panel(cx + 4, cy + 78, 66, 28, b_col, b_border)
+        cv.draw_string(cx + 8, cy + 83, "[PICK (A)]" if is_inspected else "INSPECT", COLOR_GOLD_COIN if is_inspected else COLOR_TEXT_WHITE)
+        cv.draw_string(cx + 12, cy + 93, "CONFIRM" if is_inspected else "TAP HERE", COLOR_TEXT_WHITE if is_inspected else col_rgb(14, 18, 14))
+
+    cv.draw_rounded_panel(76, 148, 104, 36, col_rgb(16, 4, 6), COLOR_MULT_RED)
+    cv.draw_string_shadow(98, 155, "SKIP PACK", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_string(102, 168, "Press (B)", col_rgb(24, 18, 18))
+
+    return cv.img
+
+def render_top_screen_active_consumable():
+    cv = ScreenCanvas()
+    # Jokers Tray
+    for j in range(5):
+        jx = 8 + j * 49
+        jy = 2
+        if j < 3:
+            cv.blit_sprite(jx, jy, 26, 36, jokers_gfx[j * 4])
+        else:
+            cv.draw_rounded_panel(jx, jy, 26, 36, col_rgb(2, 4, 3), COLOR_BOX_BORDER)
+            cv.draw_string(jx + 8, jy + 14, "+", col_rgb(8, 14, 10))
+
+    # Blind Chip at (6, 40)
+    for py in range(34):
+        sy = 40 + py
+        for px in range(34):
+            sx = 6 + px
+            c = small_chip_gfx[py * 34 + px]
+            if c != 0x0000:
+                cv.img.putpixel((sx, sy), val15_to_rgb(c))
+    cv.draw_rounded_panel(44, 40, 52, 12, col_rgb(28, 12, 4), COLOR_DIAMOND_ORANGE)
+    cv.draw_string(47, 42, "ANTE 1/8", COLOR_TEXT_WHITE)
+    cv.draw_string_shadow(44, 54, "SMALL BLIND", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(44, 66, "Reward: +$3", col_rgb(16, 24, 18))
+
+    cv.draw_rounded_panel(144, 40, 106, 36, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string(150, 43, "SCORE AT LEAST:", col_rgb(16, 22, 18))
+    cv.draw_string_2x_shadow(150, 53, "300", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+
+    # Progress bar
+    cv.draw_rounded_panel(8, 78, 240, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string(14, 83, "ROUND SCORE:", col_rgb(16, 20, 18))
+    cv.draw_string_shadow(86, 83, "120 / 300", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_fill_rect(196, 81, 19, 12, COLOR_GOLD_COIN)
+    cv.draw_outline_rect(195, 80, 50, 14, COLOR_BOX_BORDER)
+
+    # Consumable Inspector Showcase inside the Calculator area!
+    cv.draw_rounded_panel(6, 98, 244, 68, COLOR_BOX_DARK, COLOR_GOLD_COIN)
+    cv.draw_outline_rect(7, 99, 242, 66, COLOR_GOLD_COIN)
+    cv.blit_sprite(12, 102, 26, 36, cons_gfx[1], selected=True) # The Magician
+    cv.draw_string_shadow(44, 101, "The Magician", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(44, 112, "TAROT CARD", col_rgb(24, 12, 31))
+    cv.draw_string(136, 112, "Req: 1-2 cards", COLOR_TEXT_WHITE)
+    cv.draw_string_wrapped(44, 124, 202, "Converts up to 2 selected cards into Lucky Cards.", COLOR_TEXT_WHITE)
+    cv.draw_string(44, 153, "Tap [USE CARD] or press (A) to activate", col_rgb(16, 28, 18))
+
+    # Bottom Stats Bar
+    cv.draw_rounded_panel(6, 168, 74, 18, col_rgb(20, 16, 4), COLOR_GOLD_COIN)
+    cv.draw_string_shadow(14, 173, "$8", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_rounded_panel(86, 168, 78, 18, COLOR_CHIPS_BLUE, COLOR_BOX_BORDER)
+    cv.draw_string(92, 173, "3 HANDS", COLOR_TEXT_WHITE)
+    cv.draw_rounded_panel(170, 168, 80, 18, COLOR_MULT_RED, COLOR_BOX_BORDER)
+    cv.draw_string(174, 173, "2 DISCARDS", COLOR_TEXT_WHITE)
+
+    return cv.img
+
+def render_top_screen_active_card_inspect():
+    cv = ScreenCanvas()
+    # Jokers Tray
+    for j in range(5):
+        jx = 8 + j * 49
+        jy = 2
+        if j < 3:
+            cv.blit_sprite(jx, jy, 26, 36, jokers_gfx[j * 4])
+        else:
+            cv.draw_rounded_panel(jx, jy, 26, 36, col_rgb(2, 4, 3), COLOR_BOX_BORDER)
+            cv.draw_string(jx + 8, jy + 14, "+", col_rgb(8, 14, 10))
+
+    for py in range(34):
+        sy = 40 + py
+        for px in range(34):
+            sx = 6 + px
+            c = small_chip_gfx[py * 34 + px]
+            if c != 0x0000:
+                cv.img.putpixel((sx, sy), val15_to_rgb(c))
+    cv.draw_rounded_panel(44, 40, 52, 12, col_rgb(28, 12, 4), COLOR_DIAMOND_ORANGE)
+    cv.draw_string(47, 42, "ANTE 1/8", COLOR_TEXT_WHITE)
+    cv.draw_string_shadow(44, 54, "SMALL BLIND", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(44, 66, "Reward: +$3", col_rgb(16, 24, 18))
+
+    cv.draw_rounded_panel(144, 40, 106, 36, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string(150, 43, "SCORE AT LEAST:", col_rgb(16, 22, 18))
+    cv.draw_string_2x_shadow(150, 53, "300", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+
+    cv.draw_rounded_panel(8, 78, 240, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_string(14, 83, "ROUND SCORE:", col_rgb(16, 20, 18))
+    cv.draw_string_shadow(86, 83, "0 / 300", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+
+    # Calculator Box with 1 Enhanced Card inspected!
+    cv.draw_rounded_panel(6, 98, 244, 68, COLOR_BOX_DARK, COLOR_BOX_BORDER)
+    cv.draw_rounded_panel(12, 102, 98, 40, COLOR_CHIPS_BLUE, col_rgb(8, 24, 31))
+    cv.draw_string(16, 105, "CHIPS", col_rgb(18, 26, 31))
+    cv.draw_string_2x_shadow(18, 117, "14", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+    cv.draw_string_2x_shadow(118, 114, "X", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_rounded_panel(146, 102, 98, 40, COLOR_MULT_RED, col_rgb(31, 10, 12))
+    cv.draw_string(150, 105, "MULT", col_rgb(31, 22, 24))
+    cv.draw_string_2x_shadow(152, 117, "2.0", COLOR_TEXT_WHITE, COLOR_BOX_DARK)
+
+    # 1 Card inspected: Ace of Hearts (Glass Card)
+    cv.draw_string_shadow(12, 146, "Ace of Hearts", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_string(170, 146, "+11 Chips", COLOR_TEXT_WHITE)
+    cv.draw_string(12, 156, "[Glass Card] x2 Mult. 1 in 4 chance to destroy card.", COLOR_DIAMOND_ORANGE)
+
+    cv.draw_rounded_panel(6, 168, 74, 18, col_rgb(20, 16, 4), COLOR_GOLD_COIN)
+    cv.draw_string_shadow(14, 173, "$8", COLOR_GOLD_COIN, COLOR_BOX_DARK)
+    cv.draw_rounded_panel(86, 168, 78, 18, COLOR_CHIPS_BLUE, COLOR_BOX_BORDER)
+    cv.draw_string(92, 173, "4 HANDS", COLOR_TEXT_WHITE)
+    cv.draw_rounded_panel(170, 168, 80, 18, COLOR_MULT_RED, COLOR_BOX_BORDER)
+    cv.draw_string(174, 173, "3 DISCARDS", COLOR_TEXT_WHITE)
+
     return cv.img
 
 os.makedirs("build", exist_ok=True)
-# 1. Active Round
+
+# 1. Active Round Hand View
 top_act = render_top_screen_active()
 bot_act = render_bottom_screen_active()
 dual_act = combine_dual_screen(top_act, bot_act)
 dual_act.save("build/balatro_dsi_active_round_preview.png")
 
-# 2. Shop View
+# 2. Active Round Joker Inspector View
+bot_joker_insp = render_bottom_screen_joker_inspector()
+dual_joker_insp = combine_dual_screen(top_act, bot_joker_insp)
+dual_joker_insp.save("build/balatro_dsi_joker_inspector_preview.png")
+
+# 3. Active Round Consumable (Tarot/Planet) Inspector View
+top_c_insp = render_top_screen_active_consumable()
+dual_c_insp = combine_dual_screen(top_c_insp, bot_act)
+dual_c_insp.save("build/balatro_dsi_consumable_inspector_preview.png")
+
+# 4. Active Round Enhanced Card Inspector View
+top_card_insp = render_top_screen_active_card_inspect()
+dual_card_insp = combine_dual_screen(top_card_insp, bot_act)
+dual_card_insp.save("build/balatro_dsi_card_inspector_preview.png")
+
+# 5. Booster Pack Opening View (Top Screen Showcase + Bottom 3 Cards)
+top_booster = render_top_screen_booster_open()
+bot_booster = render_bottom_screen_booster_open()
+dual_booster = combine_dual_screen(top_booster, bot_booster)
+dual_booster.save("build/balatro_dsi_booster_open_preview.png")
+
+# 6. Shop View
 top_shop = render_top_screen_shop()
 bot_shop = render_bottom_screen_shop()
 dual_shop = combine_dual_screen(top_shop, bot_shop)
 dual_shop.save("build/balatro_dsi_shop_preview.png")
 
-# 3. Shop Inventory Sell View
+# 7. Shop Inventory Sell View
 bot_shop_inv = render_bottom_screen_shop_inv()
 dual_shop_inv = combine_dual_screen(top_shop, bot_shop_inv)
 dual_shop_inv.save("build/balatro_dsi_shop_inventory_preview.png")
 
 print("All dual screen previews generated successfully!")
+
 

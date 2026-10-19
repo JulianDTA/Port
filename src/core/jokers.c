@@ -263,6 +263,57 @@ static void cb_cavendish_hand(Joker* self, HandType hand, int count, const Round
     score_state_multiply_mult(score, 3.0);
 }
 
+const char* joker_get_description(JokerId id) {
+    switch (id) {
+        case JOKER_JOKER:             return "+4 Mult";
+        case JOKER_GREEDY:            return "+3 Mult per played Diamond";
+        case JOKER_LUSTY:             return "+3 Mult per played Heart";
+        case JOKER_WRATHFUL:          return "+3 Mult per played Spade";
+        case JOKER_GLUTTONOUS:        return "+3 Mult per played Club";
+        case JOKER_JOLLY:             return "+8 Mult if hand contains a Pair";
+        case JOKER_ZANY:              return "+12 Mult if hand has 3 of a Kind";
+        case JOKER_MAD:               return "+10 Mult if hand contains Two Pair";
+        case JOKER_CRAZY:             return "+12 Mult if hand has a Straight";
+        case JOKER_DROLL:             return "+10 Mult if hand contains a Flush";
+        case JOKER_SLY:               return "+50 Chips if hand contains a Pair";
+        case JOKER_WILY:              return "+100 Chips if hand has 3 of a Kind";
+        case JOKER_CLEVER:            return "+80 Chips if hand contains Two Pair";
+        case JOKER_DEVIOUS:           return "+100 Chips if hand has a Straight";
+        case JOKER_CRAFTY:            return "+80 Chips if hand contains a Flush";
+        case JOKER_HALF:              return "+20 Mult if hand has <= 3 cards";
+        case JOKER_BANNER:            return "+30 Chips per remaining discard";
+        case JOKER_MYSTIC_SUMMIT:     return "+15 Mult when 0 discards left";
+        case JOKER_BARON:             return "Each King in hand gives x1.5 Mult";
+        case JOKER_EVEN_STEVEN:       return "Even cards (10,8,6,4,2) give +4 Mult";
+        case JOKER_ODD_TODD:          return "Odd cards (A,9,7,5,3) give +31 Chips";
+        case JOKER_SCHOLAR:           return "Played Aces give +20 Chips & +4 Mult";
+        case JOKER_FIBONACCI:         return "Played A, 2, 3, 5, 8 give +8 Mult";
+        case JOKER_SCARY_FACE:        return "Played face cards give +30 Chips";
+        case JOKER_SMILEY_FACE:       return "Played face cards give +5 Mult";
+        case JOKER_ABSTRACT:          return "+3 Mult for each Joker owned";
+        case JOKER_BLUE_JOKER:        return "+2 Chips for each card in deck";
+        case JOKER_STENCIL:           return "x1 Mult for each empty Joker slot";
+        case JOKER_BLACKBOARD:        return "x3 Mult if hand is Spades/Clubs";
+        case JOKER_ICE_CREAM:         return "+100 Chips (-5 per hand played)";
+        case JOKER_POPCORN:           return "+20 Mult (-4 per round)";
+        case JOKER_GROS_MICHEL:       return "+15 Mult (1 in 6 chance to expire)";
+        case JOKER_CAVENDISH:         return "x3 Mult (1 in 1000 chance to expire)";
+        case JOKER_THE_DUO:           return "x2 Mult if hand contains a Pair";
+        case JOKER_THE_TRIO:          return "x3 Mult if hand has 3 of a Kind";
+        default:                      return "Special Joker effect";
+    }
+}
+
+const char* joker_get_rarity_name(JokerRarity rarity) {
+    switch (rarity) {
+        case RARITY_COMMON:    return "COMMON";
+        case RARITY_UNCOMMON:  return "UNCOMMON";
+        case RARITY_RARE:      return "RARE";
+        case RARITY_LEGENDARY: return "LEGENDARY";
+        default:               return "";
+    }
+}
+
 // -------------------------------------------------------------
 // Joker Factory
 // -------------------------------------------------------------
@@ -274,6 +325,7 @@ void joker_create(Joker* joker, JokerId id, CardEdition edition) {
     joker->edition = edition;
     joker->cost = 4;
     joker->rarity = RARITY_COMMON;
+    joker->description = joker_get_description(id);
 
     switch (id) {
         case JOKER_JOKER:

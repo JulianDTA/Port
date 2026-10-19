@@ -45,6 +45,8 @@ void game_session_init(GameSession* game) {
     game->dollars = 4;
     game->rng_state = 0x87654321;
     game->selected_consumable_slot = -1;
+    game->inspecting_jokers = false;
+    game->inspected_joker_idx = 0;
 
     for (int i = 0; i < 13; ++i) {
         game->hand_levels[i] = 1;
@@ -431,3 +433,19 @@ bool game_sell_consumable(GameSession* game, int consumable_index) {
     game->selected_consumable_slot = -1;
     return true;
 }
+
+bool game_swap_jokers(GameSession* game, int idx1, int idx2) {
+    if (!game) return false;
+    if (idx1 < 0 || idx1 >= game->joker_count || idx2 < 0 || idx2 >= game->joker_count) {
+        return false;
+    }
+    if (idx1 == idx2) return true;
+    Joker temp = game->jokers_storage[idx1];
+    game->jokers_storage[idx1] = game->jokers_storage[idx2];
+    game->jokers_storage[idx2] = temp;
+    for (int i = 0; i < game->joker_count; ++i) {
+        game->jokers[i] = &game->jokers_storage[i];
+    }
+    return true;
+}
+

@@ -72,6 +72,7 @@ typedef struct {
 struct Joker {
     JokerId id;
     const char* name;
+    const char* description;
     JokerRarity rarity;
     int32_t cost;
     int32_t sell_value;
@@ -88,6 +89,8 @@ struct Joker {
 };
 
 void joker_create(Joker* joker, JokerId id, CardEdition edition);
+const char* joker_get_description(JokerId id);
+const char* joker_get_rarity_name(JokerRarity rarity);
 void joker_trigger_card_scored(Joker* jokers[], int count, const Card* card, ScoreState* score);
 void joker_trigger_held_in_hand(Joker* jokers[], int count, const Card* card, ScoreState* score);
 void joker_trigger_hand_evaluated(Joker* jokers[], int count, HandType hand_type, int played_card_count, const RoundContext* ctx, ScoreState* score);

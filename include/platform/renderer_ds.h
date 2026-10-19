@@ -43,6 +43,8 @@ void draw_outline_rect(uint16_t* fb, int x, int y, int w, int h, uint16_t color)
 void draw_rounded_panel(uint16_t* fb, int x, int y, int w, int h, uint16_t fill_col, uint16_t border_col);
 void draw_string(uint16_t* fb, int x, int y, const char* str, uint16_t text_col);
 void draw_string_shadow(uint16_t* fb, int x, int y, const char* str, uint16_t text_col, uint16_t shadow_col);
+void draw_string_wrapped(uint16_t* fb, int x, int y, int max_w, const char* str, uint16_t text_col);
+void draw_string_clipped(uint16_t* fb, int x, int y, int max_w, const char* str, uint16_t text_col);
 void draw_string_2x(uint16_t* fb, int x, int y, const char* str, uint16_t text_col);
 void draw_string_2x_shadow(uint16_t* fb, int x, int y, const char* str, uint16_t text_col, uint16_t shadow_col);
 

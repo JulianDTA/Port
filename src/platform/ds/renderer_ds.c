@@ -164,6 +164,8 @@ void draw_string(uint16_t* fb, int x, int y, const char* str, uint16_t text_col)
     if (!str) return;
     int cur_x = x;
     while (*str) {
+        if (cur_x >= DS_SCREEN_W) break;
+        if (y >= DS_SCREEN_H) return;
         if (*str == '\n') {
             cur_x = x;
             y += 8;
@@ -178,6 +180,71 @@ void draw_string(uint16_t* fb, int x, int y, const char* str, uint16_t text_col)
 void draw_string_shadow(uint16_t* fb, int x, int y, const char* str, uint16_t text_col, uint16_t shadow_col) {
     draw_string(fb, x + 1, y + 1, str, shadow_col);
     draw_string(fb, x, y, str, text_col);
+}
+
+void draw_string_wrapped(uint16_t* fb, int x, int y, int max_w, const char* str, uint16_t text_col) {
+    if (!fb || !str || max_w <= 6) return;
+    int cur_x = x;
+    int cur_y = y;
+    const char* p = str;
+
+    while (*p) {
+        if (cur_x == x && *p == ' ') {
+            p++;
+            continue;
+        }
+
+        const char* word_end = p;
+        while (*word_end && *word_end != ' ' && *word_end != '\n') {
+            word_end++;
+        }
+        int word_len = (int)(word_end - p);
+        int word_w = word_len * 6;
+
+        if (cur_x > x && (cur_x + word_w) > (x + max_w)) {
+            cur_x = x;
+            cur_y += 9;
+        }
+
+        if (cur_y + 7 >= DS_SCREEN_H) return;
+
+        for (const char* w = p; w < word_end; ++w) {
+            if (cur_x + 5 <= x + max_w) {
+                draw_char(fb, cur_x, cur_y, *w, text_col);
+                cur_x += 6;
+            } else {
+                break;
+            }
+        }
+
+        if (*word_end == '\n') {
+            cur_x = x;
+            cur_y += 9;
+            p = word_end + 1;
+        } else if (*word_end == ' ') {
+            if (cur_x + 6 <= x + max_w) {
+                cur_x += 6;
+            } else {
+                cur_x = x;
+                cur_y += 9;
+            }
+            p = word_end + 1;
+        } else {
+            p = word_end;
+        }
+    }
+}
+
+void draw_string_clipped(uint16_t* fb, int x, int y, int max_w, const char* str, uint16_t text_col) {
+    if (!fb || !str || max_w <= 0 || y < 0 || y + 7 > DS_SCREEN_H) return;
+    int cur_x = x;
+    while (*str) {
+        if (cur_x + 5 > x + max_w) break;
+        if (*str == '\n') break;
+        draw_char(fb, cur_x, y, *str, text_col);
+        cur_x += 6;
+        str++;
+    }
 }
 
 // 2x Scaled Bold Font for Balatro Numbers & Badges
@@ -376,59 +443,199 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
         return;
     }
 
-    // --- State: Shop Top Screen ---
-    if (game->current_state == STATE_SHOP || game->current_state == STATE_BOOSTER_OPEN) {
-        draw_rounded_panel(fb, 70, 2, 116, 16, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-        draw_string_shadow(fb, 80, 5, "* BALATRO SHOP *", COLOR_GOLD_COIN, COLOR_BOX_DARK);
-
-        // Money Badge
-        draw_rounded_panel(fb, 8, 22, 94, 24, COLOR_RGB(24, 18, 4), COLOR_GOLD_COIN);
+    // --- State: Booster Pack Opening Top Screen ---
+    if (game->current_state == STATE_BOOSTER_OPEN) {
+        draw_rounded_panel(fb, 6, 2, 244, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER);
         char mon_str[24];
         sprintf(mon_str, "$%d CASH", game->dollars);
-        draw_string_shadow(fb, 16, 30, mon_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        draw_string_shadow(fb, 12, 7, mon_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        PackType pt = game->shop.active_pack;
+        char pack_title[40];
+        sprintf(pack_title, "* %s *", shop_get_pack_name(pt));
+        draw_string_shadow(fb, 76, 7, pack_title, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        char ante_str[16];
+        sprintf(ante_str, "ANTE %d/8", game->ante);
+        draw_string(fb, 200, 7, ante_str, COLOR_DIAMOND_ORANGE);
 
-        // Jokers Info
-        char jk_info[32];
-        sprintf(jk_info, "JOKERS: %d/5", game->joker_count);
-        draw_string(fb, 114, 24, jk_info, COLOR_TEXT_WHITE);
+        // Inspected Pack Card Showcase Panel (y = 26 to y = 126)
+        draw_rounded_panel(fb, 6, 26, 244, 100, COLOR_BOX_DARK, COLOR_GOLD_COIN);
+        int p_idx = game->shop.pack_inspect_idx;
+        if (p_idx < 0 || p_idx >= 3) p_idx = 0;
+        const ShopSlot* choice = &game->shop.pack_cards[p_idx];
 
-        char cs_info[32];
-        sprintf(cs_info, "CONSUMABLES: %d/2", game->consumable_count);
-        draw_string(fb, 114, 36, cs_info, COLOR_TEXT_WHITE);
+        char card_num_str[32];
+        sprintf(card_num_str, "[PACK CARD %d of 3 - INSPECT]", p_idx + 1);
+        draw_string(fb, 12, 30, card_num_str, COLOR_GOLD_COIN);
 
-        // Draw Owned Jokers in a neat row
-        for (int i = 0; i < 5; ++i) {
-            int jx = 8 + i * 49;
-            int jy = 54;
-            if (i < game->joker_count && game->jokers[i]) {
-                renderer_draw_joker_sprite(fb, jx, jy, game->jokers[i], false);
-                char jname[12];
-                strncpy(jname, game->jokers[i]->name, 7);
-                jname[7] = '\0';
-                draw_string(fb, jx, jy + 38, jname, COLOR_TEXT_WHITE);
+        if (choice->type == SHOP_ITEM_TAROT || choice->type == SHOP_ITEM_PLANET) {
+            const Consumable* cs = &choice->data.consumable;
+            renderer_draw_consumable_sprite(fb, 14, 44, cs, false);
+            draw_string_shadow(fb, 46, 44, cs->name, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+            const char* ctype = (cs->type == CONSUMABLE_TAROT ? "TAROT CARD" : "PLANET CARD");
+            draw_string(fb, 46, 56, ctype, (cs->type == CONSUMABLE_TAROT ? COLOR_RGB(24, 12, 31) : COLOR_CHIPS_BLUE));
+
+            if (cs->min_selected > 0) {
+                char req_str[32];
+                sprintf(req_str, "Req: %d-%d cards", cs->min_selected, cs->max_selected);
+                draw_string(fb, 126, 56, req_str, COLOR_TEXT_WHITE);
             } else {
-                draw_rounded_panel(fb, jx, jy, 26, 36, COLOR_RGB(2, 4, 3), COLOR_BOX_BORDER);
-                draw_string(fb, jx + 8, jy + 14, "+", COLOR_RGB(8, 14, 10));
+                draw_string(fb, 126, 56, "Instant use", COLOR_TEXT_WHITE);
+            }
+
+            draw_string_wrapped(fb, 46, 70, 198, cs->description, COLOR_TEXT_WHITE);
+            draw_string(fb, 46, 112, "Tap [PICK (A)] or press (A) to add to inventory.", COLOR_RGB(16, 24, 18));
+        } else if (choice->type == SHOP_ITEM_JOKER) {
+            const Joker* jk = &choice->data.joker;
+            renderer_draw_joker_sprite(fb, 14, 44, jk, false);
+            draw_string_shadow(fb, 46, 44, jk->name, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+            uint16_t r_col = (jk->rarity == RARITY_COMMON ? COLOR_CHIPS_BLUE : (jk->rarity == RARITY_UNCOMMON ? COLOR_RGB(6, 26, 12) : COLOR_MULT_RED));
+            draw_string(fb, 46, 56, joker_get_rarity_name(jk->rarity), r_col);
+
+            draw_string_wrapped(fb, 46, 70, 198, joker_get_description(jk->id), COLOR_TEXT_WHITE);
+            draw_string(fb, 46, 112, "Tap [PICK (A)] or press (A) to add to Jokers.", COLOR_RGB(16, 24, 18));
+        }
+
+        // Current Inventory Row (y = 130 to y = 188)
+        draw_rounded_panel(fb, 6, 130, 244, 58, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        char inv_hdr[48];
+        sprintf(inv_hdr, "YOUR INVENTORY: Jokers (%d/5)  Items (%d/2)", game->joker_count, game->consumable_count);
+        draw_string(fb, 12, 133, inv_hdr, COLOR_RGB(18, 26, 20));
+
+        for (int j = 0; j < 5; ++j) {
+            int jx = 10 + j * 32;
+            int jy = 146;
+            if (j < game->joker_count && game->jokers[j]) {
+                renderer_draw_joker_sprite(fb, jx + 3, jy + 1, game->jokers[j], false);
+            } else {
+                draw_rounded_panel(fb, jx, jy, 26, 38, COLOR_RGB(2, 4, 3), COLOR_BOX_BORDER);
+                draw_string(fb, jx + 8, jy + 15, "+", COLOR_RGB(8, 14, 10));
             }
         }
 
-        // Draw Owned Consumables (Tarots / Planets)
         for (int c = 0; c < 2; ++c) {
-            int cx = 156 + c * 46;
-            int cy = 114;
+            int cx = 178 + c * 34;
+            int cy = 146;
             if (c < game->consumable_count && game->consumables[c].type != CONSUMABLE_NONE) {
-                renderer_draw_consumable_sprite(fb, cx, cy, &game->consumables[c], false);
-                char cname[12];
-                strncpy(cname, game->consumables[c].name, 7);
-                cname[7] = '\0';
-                draw_string(fb, cx, cy + 38, cname, COLOR_GOLD_COIN);
+                renderer_draw_consumable_sprite(fb, cx + 4, cy + 1, &game->consumables[c], false);
             } else {
-                draw_rounded_panel(fb, cx, cy, 26, 36, COLOR_RGB(2, 4, 3), COLOR_BOX_BORDER);
-                draw_string(fb, cx + 8, cy + 14, "T", COLOR_RGB(8, 14, 10));
+                draw_rounded_panel(fb, cx, cy, 26, 38, COLOR_RGB(2, 4, 3), COLOR_BOX_BORDER);
+                draw_string(fb, cx + 8, cy + 15, "T", COLOR_RGB(8, 14, 10));
+            }
+        }
+        return;
+    }
+
+    // --- State: Shop Top Screen ---
+    if (game->current_state == STATE_SHOP) {
+        // Header
+        draw_rounded_panel(fb, 6, 2, 244, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        char mon_str[24];
+        sprintf(mon_str, "$%d CASH", game->dollars);
+        draw_string_shadow(fb, 12, 7, mon_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        draw_string_shadow(fb, 88, 7, "* BALATRO SHOP *", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        char ante_str[16];
+        sprintf(ante_str, "ANTE %d/8", game->ante);
+        draw_string(fb, 200, 7, ante_str, COLOR_DIAMOND_ORANGE);
+
+        // Active Selected Item Showcase Panel (y = 26 to y = 126)
+        draw_rounded_panel(fb, 6, 26, 244, 100, COLOR_BOX_DARK, COLOR_GOLD_COIN);
+        int item = game->shop.selected_shop_item;
+
+        if (item == 0) {
+            // Slot 0 Joker
+            draw_string(fb, 12, 30, "[SHOP JOKER EFFECT]", COLOR_GOLD_COIN);
+            if (game->shop.slots[0].is_sold) {
+                draw_string(fb, 20, 60, "This Joker has already been purchased.", COLOR_RGB(18, 12, 12));
+            } else {
+                const Joker* jk = &game->shop.slots[0].data.joker;
+                renderer_draw_joker_sprite(fb, 14, 44, jk, false);
+                draw_string_shadow(fb, 46, 44, jk->name, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+                uint16_t r_col = (jk->rarity == RARITY_COMMON ? COLOR_CHIPS_BLUE : (jk->rarity == RARITY_UNCOMMON ? COLOR_RGB(6, 26, 12) : COLOR_MULT_RED));
+                draw_string(fb, 46, 56, joker_get_rarity_name(jk->rarity), r_col);
+
+                char pr_str[32];
+                sprintf(pr_str, "Cost: $%d  |  Sell: $%d", game->shop.slots[0].cost, (int)jk->sell_value);
+                draw_string(fb, 116, 56, pr_str, COLOR_TEXT_WHITE);
+
+                draw_string_wrapped(fb, 46, 70, 198, joker_get_description(jk->id), COLOR_TEXT_WHITE);
+                draw_string(fb, 46, 112, "Passive scoring & multiplier bonus.", COLOR_RGB(16, 24, 18));
+            }
+        } else if (item == 1) {
+            // Slot 1 Consumable
+            draw_string(fb, 12, 30, "[SHOP CONSUMABLE EFFECT]", COLOR_GOLD_COIN);
+            if (game->shop.slots[1].is_sold) {
+                draw_string(fb, 20, 60, "This Consumable has already been purchased.", COLOR_RGB(18, 12, 12));
+            } else {
+                const Consumable* cs = &game->shop.slots[1].data.consumable;
+                renderer_draw_consumable_sprite(fb, 14, 44, cs, false);
+                draw_string_shadow(fb, 46, 44, cs->name, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+                const char* ctype = (cs->type == CONSUMABLE_TAROT ? "TAROT CARD" : "PLANET CARD");
+                draw_string(fb, 46, 56, ctype, (cs->type == CONSUMABLE_TAROT ? COLOR_RGB(24, 12, 31) : COLOR_CHIPS_BLUE));
+
+                char pr_str[32];
+                sprintf(pr_str, "Cost: $%d  |  Sell: $1", game->shop.slots[1].cost);
+                draw_string(fb, 136, 56, pr_str, COLOR_TEXT_WHITE);
+
+                draw_string_wrapped(fb, 46, 70, 198, cs->description, COLOR_TEXT_WHITE);
+                draw_string(fb, 46, 112, "Store or use immediately in hand.", COLOR_RGB(16, 24, 18));
+            }
+        } else if (item == 2) {
+            // Booster Pack
+            draw_string(fb, 12, 30, "[BOOSTER PACK CONTENTS]", COLOR_GOLD_COIN);
+            if (game->shop.pack_slot.is_sold) {
+                draw_string(fb, 20, 60, "Booster pack already opened this round.", COLOR_RGB(18, 12, 12));
+            } else {
+                PackType pt = game->shop.pack_slot.data.pack_type;
+                draw_string_shadow(fb, 14, 46, shop_get_pack_name(pt), COLOR_GOLD_COIN, COLOR_BOX_DARK);
+                draw_string(fb, 180, 46, "Cost: $4", COLOR_TEXT_WHITE);
+                draw_string_wrapped(fb, 14, 64, 230, shop_get_pack_description(pt), COLOR_TEXT_WHITE);
+                draw_string(fb, 14, 110, "Choose and keep 1 card inside.", COLOR_RGB(16, 24, 18));
+            }
+        } else if (item == 3) {
+            // Voucher
+            draw_string(fb, 12, 30, "[STORE VOUCHER PERK]", COLOR_GOLD_COIN);
+            if (game->shop.voucher_slot.is_sold) {
+                draw_string(fb, 20, 60, "Voucher purchased for this entire run.", COLOR_RGB(12, 24, 12));
+            } else {
+                VoucherId vid = game->shop.voucher_slot.data.voucher_id;
+                draw_string_shadow(fb, 14, 46, shop_get_voucher_name(vid), COLOR_GOLD_COIN, COLOR_BOX_DARK);
+                draw_string(fb, 180, 46, "Cost: $10", COLOR_TEXT_WHITE);
+                draw_string_wrapped(fb, 14, 64, 230, shop_get_voucher_description(vid), COLOR_TEXT_WHITE);
+                draw_string(fb, 14, 110, "Permanent upgrade for this run.", COLOR_RGB(16, 24, 18));
             }
         }
 
-        draw_string(fb, 14, 168, "Manage or inspect your deck & inventory", COLOR_RGB(16, 22, 18));
+        // Current Inventory Row (y = 130 to y = 188)
+        draw_rounded_panel(fb, 6, 130, 244, 58, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        char inv_hdr[48];
+        sprintf(inv_hdr, "OWNED: Jokers (%d/5)  Items (%d/2)", game->joker_count, game->consumable_count);
+        draw_string(fb, 12, 133, inv_hdr, COLOR_RGB(18, 26, 20));
+
+        for (int j = 0; j < 5; ++j) {
+            int jx = 10 + j * 32;
+            int jy = 146;
+            if (j < game->joker_count && game->jokers[j]) {
+                renderer_draw_joker_sprite(fb, jx + 3, jy + 1, game->jokers[j], false);
+            } else {
+                draw_rounded_panel(fb, jx, jy, 26, 38, COLOR_RGB(2, 4, 3), COLOR_BOX_BORDER);
+                draw_string(fb, jx + 8, jy + 15, "+", COLOR_RGB(8, 14, 10));
+            }
+        }
+
+        for (int c = 0; c < 2; ++c) {
+            int cx = 178 + c * 34;
+            int cy = 146;
+            if (c < game->consumable_count && game->consumables[c].type != CONSUMABLE_NONE) {
+                renderer_draw_consumable_sprite(fb, cx + 4, cy + 1, &game->consumables[c], false);
+            } else {
+                draw_rounded_panel(fb, cx, cy, 26, 38, COLOR_RGB(2, 4, 3), COLOR_BOX_BORDER);
+                draw_string(fb, cx + 8, cy + 15, "T", COLOR_RGB(8, 14, 10));
+            }
+        }
         return;
     }
 
@@ -509,61 +716,119 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
         draw_outline_rect(fb, 195, 80, 50, 14, COLOR_BOX_BORDER);
     }
 
-    // 4. Iconic Chips & Mult Calculator Box at (6, 98)
-    draw_rounded_panel(fb, 6, 98, 244, 68, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+    // 4. Iconic Chips & Mult Calculator Box OR Consumable Showcase at (6, 98)
+    if (game->selected_consumable_slot >= 0 && game->selected_consumable_slot < MAX_CONSUMABLES_SLOTS &&
+        game->consumables[game->selected_consumable_slot].type != CONSUMABLE_NONE &&
+        game->current_state != STATE_ROUND_SCORING) {
+        
+        const Consumable* sel_c = &game->consumables[game->selected_consumable_slot];
+        draw_rounded_panel(fb, 6, 98, 244, 68, COLOR_BOX_DARK, COLOR_GOLD_COIN);
+        draw_outline_rect(fb, 7, 99, 242, 66, COLOR_GOLD_COIN);
 
-    int64_t disp_chips = 0;
-    double disp_mult = 1.0;
-    const char* hand_display_name = "SELECT 1-5 CARDS";
-    bool is_previewing = false;
+        renderer_draw_consumable_sprite(fb, 12, 102, sel_c, true);
 
-    if (game->current_state == STATE_ROUND_SCORING) {
-        disp_chips = game->last_score.chips;
-        disp_mult = game->last_score.mult;
-        hand_display_name = poker_hand_name(game->last_eval.type);
-    } else if (game->preview_eval.type != HAND_NONE) {
-        disp_chips = game->preview_score.chips;
-        disp_mult = game->preview_score.mult;
-        hand_display_name = poker_hand_name(game->preview_eval.type);
-        is_previewing = true;
-    } else if (game->last_score.final_score > 0) {
-        disp_chips = game->last_score.chips;
-        disp_mult = game->last_score.mult;
-        hand_display_name = poker_hand_name(game->last_eval.type);
-    }
+        draw_string_shadow(fb, 44, 101, sel_c->name, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        const char* ctype = (sel_c->type == CONSUMABLE_TAROT ? "TAROT CARD" : "PLANET CARD");
+        uint16_t ct_col = (sel_c->type == CONSUMABLE_TAROT ? COLOR_RGB(24, 12, 31) : COLOR_CHIPS_BLUE);
+        draw_string(fb, 44, 112, ctype, ct_col);
 
-    // Blue Chips Box (Left)
-    draw_rounded_panel(fb, 12, 102, 98, 40, COLOR_CHIPS_BLUE, COLOR_RGB(8, 24, 31));
-    draw_outline_rect(fb, 13, 103, 96, 38, COLOR_RGB(16, 26, 31));
-    draw_string(fb, 16, 105, "CHIPS", COLOR_RGB(18, 26, 31));
-    char chips_val[16];
-    sprintf(chips_val, "%lld", (long long)disp_chips);
-    draw_string_2x_shadow(fb, 18, 117, chips_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        if (sel_c->min_selected > 0) {
+            char req_str[32];
+            sprintf(req_str, "Req: %d-%d cards", sel_c->min_selected, sel_c->max_selected);
+            draw_string(fb, 136, 112, req_str, COLOR_TEXT_WHITE);
+        } else {
+            draw_string(fb, 136, 112, "Instant use", COLOR_TEXT_WHITE);
+        }
 
-    // Center Gold "X"
-    draw_string_2x_shadow(fb, 118, 114, "X", COLOR_GOLD_COIN, COLOR_BOX_DARK);
-
-    // Red Mult Box (Right)
-    draw_rounded_panel(fb, 146, 102, 98, 40, COLOR_MULT_RED, COLOR_RGB(31, 10, 12));
-    draw_outline_rect(fb, 147, 103, 96, 38, COLOR_RGB(31, 18, 20));
-    draw_string(fb, 150, 105, "MULT", COLOR_RGB(31, 22, 24));
-    char mult_val[16];
-    sprintf(mult_val, "%.1f", disp_mult);
-    draw_string_2x_shadow(fb, 152, 117, mult_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
-
-    // Hand Name Badge
-    uint16_t h_col = (is_previewing || game->current_state == STATE_ROUND_SCORING) ? COLOR_GOLD_COIN : COLOR_RGB(14, 20, 16);
-    draw_string_shadow(fb, 14, 148, hand_display_name, h_col, COLOR_BOX_DARK);
-
-    if (game->current_state == STATE_ROUND_SCORING) {
-        draw_string_shadow(fb, 140, 148, "SCORING HAND...", COLOR_GOLD_COIN, COLOR_BOX_DARK);
-    } else if (is_previewing) {
-        char est_str[32];
-        int64_t est_total = (int64_t)(disp_chips * disp_mult);
-        sprintf(est_str, "EST: %lld PTS", (long long)est_total);
-        draw_string_shadow(fb, 140, 148, est_str, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        draw_string_wrapped(fb, 44, 124, 202, sel_c->description, COLOR_TEXT_WHITE);
+        draw_string(fb, 44, 153, "Tap [USE CARD] or press (A) to activate", COLOR_RGB(16, 28, 18));
     } else {
-        draw_string(fb, 140, 148, "Max 5 cards", COLOR_RGB(12, 16, 14));
+        draw_rounded_panel(fb, 6, 98, 244, 68, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+
+        int64_t disp_chips = 0;
+        double disp_mult = 1.0;
+        const char* hand_display_name = "SELECT 1-5 CARDS";
+        bool is_previewing = false;
+
+        if (game->current_state == STATE_ROUND_SCORING) {
+            disp_chips = game->last_score.chips;
+            disp_mult = game->last_score.mult;
+            hand_display_name = poker_hand_name(game->last_eval.type);
+        } else if (game->preview_eval.type != HAND_NONE) {
+            disp_chips = game->preview_score.chips;
+            disp_mult = game->preview_score.mult;
+            hand_display_name = poker_hand_name(game->preview_eval.type);
+            is_previewing = true;
+        } else if (game->last_score.final_score > 0) {
+            disp_chips = game->last_score.chips;
+            disp_mult = game->last_score.mult;
+            hand_display_name = poker_hand_name(game->last_eval.type);
+        }
+
+        // Blue Chips Box (Left)
+        draw_rounded_panel(fb, 12, 102, 98, 40, COLOR_CHIPS_BLUE, COLOR_RGB(8, 24, 31));
+        draw_outline_rect(fb, 13, 103, 96, 38, COLOR_RGB(16, 26, 31));
+        draw_string(fb, 16, 105, "CHIPS", COLOR_RGB(18, 26, 31));
+        char chips_val[16];
+        sprintf(chips_val, "%lld", (long long)disp_chips);
+        draw_string_2x_shadow(fb, 18, 117, chips_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+
+        // Center Gold "X"
+        draw_string_2x_shadow(fb, 118, 114, "X", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+        // Red Mult Box (Right)
+        draw_rounded_panel(fb, 146, 102, 98, 40, COLOR_MULT_RED, COLOR_RGB(31, 10, 12));
+        draw_outline_rect(fb, 147, 103, 96, 38, COLOR_RGB(31, 18, 20));
+        draw_string(fb, 150, 105, "MULT", COLOR_RGB(31, 22, 24));
+        char mult_val[16];
+        sprintf(mult_val, "%.1f", disp_mult);
+        draw_string_2x_shadow(fb, 152, 117, mult_val, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+
+        // Lower info inside Calculator box: check if 1 card is selected
+        const Card* sel_cards[5];
+        int sel_count = deck_get_selected_cards((DeckManager*)&game->deck, sel_cards);
+
+        if (sel_count == 1 && game->current_state == STATE_ROUND_ACTIVE) {
+            const Card* sc = sel_cards[0];
+            char cname[32];
+            sprintf(cname, "%s of %s", card_rank_name(sc->rank), card_suit_name(sc->suit));
+            draw_string_shadow(fb, 12, 146, cname, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+            char stats_buf[32];
+            sprintf(stats_buf, "+%d Chips", (int)card_get_base_chips(sc));
+            draw_string(fb, 170, 146, stats_buf, COLOR_TEXT_WHITE);
+
+            // Display enhancement / edition / seal description
+            if (sc->enhancement != ENHANCEMENT_NONE) {
+                char enh_line[64];
+                sprintf(enh_line, "[%s] %s", card_get_enhancement_name(sc->enhancement), card_get_enhancement_description(sc->enhancement));
+                draw_string_clipped(fb, 12, 156, 230, enh_line, COLOR_DIAMOND_ORANGE);
+            } else if (sc->edition != EDITION_NONE) {
+                char ed_line[64];
+                sprintf(ed_line, "[%s] %s", card_get_edition_name(sc->edition), card_get_edition_description(sc->edition));
+                draw_string_clipped(fb, 12, 156, 230, ed_line, COLOR_CHIPS_BLUE);
+            } else if (sc->seal != SEAL_NONE) {
+                char sl_line[64];
+                sprintf(sl_line, "[%s] %s", card_get_seal_name(sc->seal), card_get_seal_description(sc->seal));
+                draw_string_clipped(fb, 12, 156, 230, sl_line, COLOR_GOLD_COIN);
+            } else {
+                draw_string(fb, 12, 156, "Standard unenhanced playing card.", COLOR_RGB(14, 20, 16));
+            }
+        } else {
+            uint16_t h_col = (is_previewing || game->current_state == STATE_ROUND_SCORING) ? COLOR_GOLD_COIN : COLOR_RGB(14, 20, 16);
+            draw_string_shadow(fb, 14, 148, hand_display_name, h_col, COLOR_BOX_DARK);
+
+            if (game->current_state == STATE_ROUND_SCORING) {
+                draw_string_shadow(fb, 140, 148, "SCORING HAND...", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+            } else if (is_previewing) {
+                char est_str[32];
+                int64_t est_total = (int64_t)(disp_chips * disp_mult);
+                sprintf(est_str, "EST: %lld PTS", (long long)est_total);
+                draw_string_shadow(fb, 140, 148, est_str, COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+            } else {
+                draw_string(fb, 140, 148, "Max 5 cards", COLOR_RGB(12, 16, 14));
+            }
+        }
     }
 
     // 5. Bottom Stats Bar (Money, Hands, Discards)
@@ -614,202 +879,336 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
     if (game->current_state == STATE_SHOP) {
         if (!game->shop.show_inventory) {
             // Shop Card Slot 0 (Joker)
-            int s0_x = 8;
-            int s0_y = 10;
-            draw_rounded_panel(fb, s0_x, s0_y, 70, 78, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+            int s0_x = 6;
+            int s0_y = 6;
+            bool s0_active = (game->shop.selected_shop_item == 0);
+            draw_rounded_panel(fb, s0_x, s0_y, 76, 84, COLOR_BOX_DARK, s0_active ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
             if (!game->shop.slots[0].is_sold) {
-                renderer_draw_joker_sprite(fb, s0_x + 22, s0_y + 6, &game->shop.slots[0].data.joker, false);
-                draw_string(fb, s0_x + 4, s0_y + 46, game->shop.slots[0].data.joker.name, COLOR_TEXT_WHITE);
+                const Joker* jk = &game->shop.slots[0].data.joker;
+                renderer_draw_joker_sprite(fb, s0_x + 25, s0_y + 4, jk, false);
+                draw_string_clipped(fb, s0_x + 3, s0_y + 42, 70, jk->name, COLOR_GOLD_COIN);
+
+                uint16_t r_col = (jk->rarity == RARITY_COMMON ? COLOR_CHIPS_BLUE : (jk->rarity == RARITY_UNCOMMON ? COLOR_RGB(6, 26, 12) : COLOR_MULT_RED));
+                draw_string(fb, s0_x + 3, s0_y + 52, joker_get_rarity_name(jk->rarity), r_col);
 
                 bool can_buy = (game->dollars >= game->shop.slots[0].cost && game->joker_count < MAX_JOKERS_SLOTS);
-                uint16_t b0_bg = can_buy ? COLOR_RGB(4, 18, 8) : COLOR_RGB(8, 8, 8);
+                uint16_t b0_bg = can_buy ? COLOR_RGB(4, 20, 8) : COLOR_RGB(8, 8, 8);
                 uint16_t b0_bd = can_buy ? COLOR_GOLD_COIN : COLOR_RGB(16, 16, 16);
-                draw_rounded_panel(fb, s0_x + 4, s0_y + 58, 62, 16, b0_bg, b0_bd);
+                draw_rounded_panel(fb, s0_x + 3, s0_y + 64, 70, 16, b0_bg, b0_bd);
 
                 if (game->joker_count >= MAX_JOKERS_SLOTS) {
-                    draw_string(fb, s0_x + 8, s0_y + 62, "FULL (5/5)", COLOR_RGB(20, 16, 16));
+                    draw_string(fb, s0_x + 10, s0_y + 68, "FULL (5/5)", COLOR_RGB(20, 16, 16));
                 } else if (game->dollars < game->shop.slots[0].cost) {
                     char c0_str[24];
                     sprintf(c0_str, "NEED $%d", game->shop.slots[0].cost);
-                    draw_string(fb, s0_x + 6, s0_y + 62, c0_str, COLOR_RGB(20, 16, 16));
+                    draw_string(fb, s0_x + 10, s0_y + 68, c0_str, COLOR_RGB(20, 16, 16));
                 } else {
                     char c0_str[24];
                     sprintf(c0_str, "BUY: $%d", game->shop.slots[0].cost);
-                    draw_string(fb, s0_x + 8, s0_y + 62, c0_str, COLOR_GOLD_COIN);
+                    draw_string(fb, s0_x + 12, s0_y + 68, c0_str, COLOR_GOLD_COIN);
                 }
             } else {
-                draw_string(fb, s0_x + 16, s0_y + 36, "SOLD", COLOR_RGB(18, 8, 8));
+                draw_string(fb, s0_x + 22, s0_y + 38, "SOLD", COLOR_RGB(18, 8, 8));
             }
 
             // Shop Card Slot 1 (Tarot or Planet)
-            int s1_x = 84;
-            int s1_y = 10;
-            draw_rounded_panel(fb, s1_x, s1_y, 70, 78, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+            int s1_x = 86;
+            int s1_y = 6;
+            bool s1_active = (game->shop.selected_shop_item == 1);
+            draw_rounded_panel(fb, s1_x, s1_y, 76, 84, COLOR_BOX_DARK, s1_active ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
             if (!game->shop.slots[1].is_sold) {
-                renderer_draw_consumable_sprite(fb, s1_x + 22, s1_y + 6, &game->shop.slots[1].data.consumable, false);
-                draw_string(fb, s1_x + 4, s1_y + 46, game->shop.slots[1].data.consumable.name, COLOR_TEXT_WHITE);
+                const Consumable* cs = &game->shop.slots[1].data.consumable;
+                renderer_draw_consumable_sprite(fb, s1_x + 25, s1_y + 4, cs, false);
+                draw_string_clipped(fb, s1_x + 3, s1_y + 42, 70, cs->name, COLOR_GOLD_COIN);
+
+                const char* ctype = (cs->type == CONSUMABLE_TAROT ? "Tarot Card" : "Planet Card");
+                draw_string(fb, s1_x + 3, s1_y + 52, ctype, COLOR_TEXT_WHITE);
 
                 bool can_buy = (game->dollars >= game->shop.slots[1].cost && game->consumable_count < MAX_CONSUMABLES_SLOTS);
-                uint16_t b1_bg = can_buy ? COLOR_RGB(4, 18, 8) : COLOR_RGB(8, 8, 8);
+                uint16_t b1_bg = can_buy ? COLOR_RGB(4, 20, 8) : COLOR_RGB(8, 8, 8);
                 uint16_t b1_bd = can_buy ? COLOR_GOLD_COIN : COLOR_RGB(16, 16, 16);
-                draw_rounded_panel(fb, s1_x + 4, s1_y + 58, 62, 16, b1_bg, b1_bd);
+                draw_rounded_panel(fb, s1_x + 3, s1_y + 64, 70, 16, b1_bg, b1_bd);
 
                 if (game->consumable_count >= MAX_CONSUMABLES_SLOTS) {
-                    draw_string(fb, s1_x + 8, s1_y + 62, "FULL (2/2)", COLOR_RGB(20, 16, 16));
+                    draw_string(fb, s1_x + 10, s1_y + 68, "FULL (2/2)", COLOR_RGB(20, 16, 16));
                 } else if (game->dollars < game->shop.slots[1].cost) {
                     char c1_str[24];
                     sprintf(c1_str, "NEED $%d", game->shop.slots[1].cost);
-                    draw_string(fb, s1_x + 6, s1_y + 62, c1_str, COLOR_RGB(20, 16, 16));
+                    draw_string(fb, s1_x + 10, s1_y + 68, c1_str, COLOR_RGB(20, 16, 16));
                 } else {
                     char c1_str[24];
                     sprintf(c1_str, "BUY: $%d", game->shop.slots[1].cost);
-                    draw_string(fb, s1_x + 8, s1_y + 62, c1_str, COLOR_GOLD_COIN);
+                    draw_string(fb, s1_x + 12, s1_y + 68, c1_str, COLOR_GOLD_COIN);
                 }
             } else {
-                draw_string(fb, s1_x + 16, s1_y + 36, "SOLD", COLOR_RGB(18, 8, 8));
+                draw_string(fb, s1_x + 22, s1_y + 38, "SOLD", COLOR_RGB(18, 8, 8));
             }
 
             // Booster Pack Slot
-            int sp_x = 160;
-            int sp_y = 10;
-            draw_rounded_panel(fb, sp_x, sp_y, 88, 78, COLOR_RGB(14, 8, 22), COLOR_RGB(24, 12, 31));
+            int sp_x = 166;
+            int sp_y = 6;
+            bool sp_active = (game->shop.selected_shop_item == 2);
+            draw_rounded_panel(fb, sp_x, sp_y, 84, 84, COLOR_RGB(14, 8, 22), sp_active ? COLOR_GOLD_COIN : COLOR_RGB(24, 12, 31));
             if (!game->shop.pack_slot.is_sold) {
-                const char* pname = (game->shop.pack_slot.data.pack_type == PACK_ARCANA) ? "Arcana" :
-                                    (game->shop.pack_slot.data.pack_type == PACK_CELESTIAL) ? "Celestial" : "Buffoon";
-                draw_string_shadow(fb, sp_x + 8, sp_y + 8, pname, COLOR_GOLD_COIN, COLOR_BOX_DARK);
-                draw_string(fb, sp_x + 8, sp_y + 22, "Booster Pack", COLOR_TEXT_WHITE);
+                PackType pt = game->shop.pack_slot.data.pack_type;
+                draw_string_clipped(fb, sp_x + 4, sp_y + 6, 76, shop_get_pack_name(pt), COLOR_GOLD_COIN);
+                draw_string(fb, sp_x + 4, sp_y + 18, "Booster Pack", COLOR_TEXT_WHITE);
+
+                const char* p_desc = (pt == PACK_ARCANA) ? "3 Tarots/pick 1" :
+                                     (pt == PACK_CELESTIAL) ? "3 Planets/pick 1" :
+                                     (pt == PACK_BUFFOON) ? "2 Jokers/pick 1" : "3 Cards/pick 1";
+                draw_string(fb, sp_x + 4, sp_y + 34, p_desc, COLOR_RGB(20, 28, 22));
 
                 bool can_buy = (game->dollars >= 4);
                 uint16_t bp_bg = can_buy ? COLOR_RGB(28, 16, 4) : COLOR_RGB(10, 8, 8);
                 uint16_t bp_bd = can_buy ? COLOR_GOLD_COIN : COLOR_RGB(16, 16, 16);
-                draw_rounded_panel(fb, sp_x + 8, sp_y + 52, 72, 18, bp_bg, bp_bd);
+                draw_rounded_panel(fb, sp_x + 4, sp_y + 64, 76, 16, bp_bg, bp_bd);
 
                 if (can_buy) {
-                    draw_string(fb, sp_x + 14, sp_y + 56, "OPEN ($4)", COLOR_GOLD_COIN);
+                    draw_string(fb, sp_x + 10, sp_y + 68, "OPEN ($4)", COLOR_GOLD_COIN);
                 } else {
-                    draw_string(fb, sp_x + 14, sp_y + 56, "NEED $4", COLOR_RGB(20, 16, 16));
+                    draw_string(fb, sp_x + 14, sp_y + 68, "NEED $4", COLOR_RGB(20, 16, 16));
                 }
             } else {
-                draw_string(fb, sp_x + 22, sp_y + 36, "OPENED", COLOR_RGB(18, 8, 8));
+                draw_string(fb, sp_x + 20, sp_y + 38, "OPENED", COLOR_RGB(18, 8, 8));
             }
 
             // Voucher Slot
-            int sv_x = 8;
+            int sv_x = 6;
             int sv_y = 94;
-            draw_rounded_panel(fb, sv_x, sv_y, 146, 38, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+            bool sv_active = (game->shop.selected_shop_item == 3);
+            draw_rounded_panel(fb, sv_x, sv_y, 156, 40, COLOR_BOX_DARK, sv_active ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
             if (!game->shop.voucher_slot.is_sold) {
-                draw_string(fb, sv_x + 6, sv_y + 5, "Voucher: Upgrade", COLOR_GOLD_COIN);
+                VoucherId vid = game->shop.voucher_slot.data.voucher_id;
+                draw_string_clipped(fb, sv_x + 6, sv_y + 4, 144, shop_get_voucher_name(vid), COLOR_GOLD_COIN);
+                draw_string_clipped(fb, sv_x + 6, sv_y + 15, 144, shop_get_voucher_description(vid), COLOR_TEXT_WHITE);
+
                 bool can_vouch = (game->dollars >= game->shop.voucher_slot.cost);
                 char v_str[32];
                 sprintf(v_str, "%s ($%d)", can_vouch ? "BUY VOUCHER" : "NEED", game->shop.voucher_slot.cost);
-                draw_string(fb, sv_x + 6, sv_y + 19, v_str, can_vouch ? COLOR_TEXT_WHITE : COLOR_RGB(18, 14, 14));
+                draw_string(fb, sv_x + 6, sv_y + 27, v_str, can_vouch ? COLOR_GOLD_COIN : COLOR_RGB(18, 14, 14));
             } else {
-                draw_string(fb, sv_x + 6, sv_y + 12, "VOUCHER PURCHASED", COLOR_RGB(12, 24, 12));
+                draw_string(fb, sv_x + 6, sv_y + 14, "VOUCHER PURCHASED", COLOR_RGB(12, 24, 12));
             }
 
             // Inventory / Sell Button
-            int sinv_x = 160;
+            int sinv_x = 166;
             int sinv_y = 94;
-            draw_rounded_panel(fb, sinv_x, sinv_y, 88, 38, COLOR_RGB(24, 16, 4), COLOR_GOLD_COIN);
-            draw_string_shadow(fb, sinv_x + 12, sinv_y + 6, "INVENTORY", COLOR_GOLD_COIN, COLOR_BOX_DARK);
-            draw_string_shadow(fb, sinv_x + 8, sinv_y + 20, "[SELL ITEMS]", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+            draw_rounded_panel(fb, sinv_x, sinv_y, 84, 40, COLOR_RGB(24, 16, 4), COLOR_GOLD_COIN);
+            draw_string_shadow(fb, sinv_x + 10, sinv_y + 8, "INVENTORY", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+            draw_string_shadow(fb, sinv_x + 6, sinv_y + 22, "[SELL ITEMS]", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
             // Bottom Controls: REROLL and NEXT BLIND
             bool can_reroll = (game->dollars >= game->shop.reroll_cost);
-            draw_rounded_panel(fb, 8, 140, 110, 44, can_reroll ? COLOR_RGB(24, 14, 4) : COLOR_RGB(8, 8, 8), can_reroll ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
+            draw_rounded_panel(fb, 6, 138, 114, 48, can_reroll ? COLOR_RGB(24, 14, 4) : COLOR_RGB(8, 8, 8), can_reroll ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
             char r_str[24];
             sprintf(r_str, "REROLL ($%d)", game->shop.reroll_cost);
-            draw_string_shadow(fb, 18, 156, r_str, can_reroll ? COLOR_GOLD_COIN : COLOR_RGB(16, 16, 16), COLOR_BOX_DARK);
+            draw_string_shadow(fb, 18, 154, r_str, can_reroll ? COLOR_GOLD_COIN : COLOR_RGB(16, 16, 16), COLOR_BOX_DARK);
 
-            draw_rounded_panel(fb, 124, 140, 124, 44, COLOR_RGB(4, 26, 10), COLOR_GOLD_COIN);
-            draw_string_2x_shadow(fb, 134, 152, "NEXT BLIND", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+            draw_rounded_panel(fb, 126, 138, 124, 48, COLOR_RGB(4, 26, 10), COLOR_GOLD_COIN);
+            draw_string_2x_shadow(fb, 136, 152, "NEXT BLIND", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
             return;
         } else {
             // --- Shop Inventory Sell Mode ---
             // Top Bar
-            draw_rounded_panel(fb, 6, 4, 96, 20, COLOR_BOX_DARK, COLOR_GOLD_COIN);
-            draw_string(fb, 10, 9, "< BACK TO SHOP", COLOR_GOLD_COIN);
+            draw_rounded_panel(fb, 4, 3, 96, 20, COLOR_BOX_DARK, COLOR_GOLD_COIN);
+            draw_string(fb, 8, 8, "< BACK TO SHOP", COLOR_GOLD_COIN);
 
-            draw_rounded_panel(fb, 108, 4, 86, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-            draw_string_shadow(fb, 116, 9, "SELL ITEMS", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+            draw_rounded_panel(fb, 104, 3, 88, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+            draw_string_shadow(fb, 110, 8, "SELL INVENTORY", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
 
-            draw_rounded_panel(fb, 200, 4, 50, 20, COLOR_RGB(24, 18, 4), COLOR_GOLD_COIN);
+            draw_rounded_panel(fb, 196, 3, 56, 20, COLOR_RGB(24, 18, 4), COLOR_GOLD_COIN);
             char cash_str[16];
             sprintf(cash_str, "$%d", game->dollars);
-            draw_string_shadow(fb, 208, 9, cash_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+            draw_string_shadow(fb, 212, 8, cash_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
 
-            // Owned Jokers (5 slots)
-            draw_string(fb, 8, 28, "TAP A JOKER TO SELL:", COLOR_RGB(18, 24, 18));
+            // Owned Jokers (5 slots across y = 26 to y = 74)
             for (int j = 0; j < 5; ++j) {
                 int jx = 4 + j * 50;
-                int jy = 38;
-                draw_rounded_panel(fb, jx, jy, 48, 52, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+                int jy = 26;
+                bool is_sel = (game->shop.sell_inspect_idx == j);
+                draw_rounded_panel(fb, jx, jy, 48, 48, COLOR_BOX_DARK, is_sel ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
 
                 if (j < game->joker_count && game->jokers[j]) {
                     renderer_draw_joker_sprite(fb, jx + 11, jy + 2, game->jokers[j], false);
-                    draw_rounded_panel(fb, jx + 3, jy + 36, 42, 13, COLOR_RGB(26, 4, 6), COLOR_MULT_RED);
-                    char s_val[20];
-                    sprintf(s_val, "SELL $%d", (int)game->jokers[j]->sell_value);
-                    draw_string(fb, jx + 5, jy + 39, s_val, COLOR_TEXT_WHITE);
+                    char sname[8];
+                    strncpy(sname, game->jokers[j]->name, 6);
+                    sname[6] = '\0';
+                    draw_string(fb, jx + 4, jy + 38, sname, is_sel ? COLOR_GOLD_COIN : COLOR_TEXT_WHITE);
                 } else {
-                    draw_string(fb, jx + 18, jy + 20, "-", COLOR_RGB(10, 16, 12));
+                    draw_string(fb, jx + 8, jy + 18, "(EMPTY)", COLOR_RGB(8, 14, 10));
                 }
             }
 
-            // Owned Consumables (2 slots)
-            draw_string(fb, 8, 96, "TAP A CONSUMABLE TO SELL:", COLOR_RGB(18, 24, 18));
+            // Owned Consumables (2 slots at y = 76 to y = 114)
             for (int c = 0; c < 2; ++c) {
-                int cx = 8 + c * 124;
-                int cy = 106;
-                draw_rounded_panel(fb, cx, cy, 116, 42, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+                int cx = 4 + c * 124;
+                int cy = 76;
+                bool is_sel = (game->shop.sell_inspect_idx == (c + 5));
+                draw_rounded_panel(fb, cx, cy, 120, 38, COLOR_BOX_DARK, is_sel ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
 
                 if (c < game->consumable_count && game->consumables[c].type != CONSUMABLE_NONE) {
-                    renderer_draw_consumable_sprite(fb, cx + 4, cy + 3, &game->consumables[c], false);
-                    draw_string(fb, cx + 34, cy + 6, game->consumables[c].name, COLOR_GOLD_COIN);
-
-                    draw_rounded_panel(fb, cx + 34, cy + 20, 68, 16, COLOR_RGB(26, 4, 6), COLOR_MULT_RED);
-                    draw_string(fb, cx + 40, cy + 24, "SELL ($1)", COLOR_TEXT_WHITE);
+                    renderer_draw_consumable_sprite(fb, cx + 4, cy + 2, &game->consumables[c], false);
+                    draw_string(fb, cx + 34, cy + 4, game->consumables[c].name, COLOR_GOLD_COIN);
+                    const char* ct = (game->consumables[c].type == CONSUMABLE_TAROT ? "Tarot" : "Planet");
+                    draw_string(fb, cx + 34, cy + 18, ct, COLOR_TEXT_WHITE);
                 } else {
-                    draw_string(fb, cx + 38, cy + 16, "(EMPTY)", COLOR_RGB(12, 16, 14));
+                    draw_string(fb, cx + 38, cy + 14, "(EMPTY ITEM)", COLOR_RGB(10, 16, 12));
                 }
             }
 
-            // Return to Shop Button
-            draw_rounded_panel(fb, 24, 154, 208, 32, COLOR_RGB(4, 26, 10), COLOR_GOLD_COIN);
-            draw_string_shadow(fb, 68, 164, "DONE - RETURN TO SHOP", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+            // Bottom Details & Confirm Sell Panel (y = 116 to y = 188)
+            draw_rounded_panel(fb, 4, 116, 248, 70, COLOR_BOX_DARK, COLOR_GOLD_COIN);
+            int sel = game->shop.sell_inspect_idx;
+
+            if (sel >= 0 && sel < 5 && sel < game->joker_count && game->jokers[sel]) {
+                const Joker* j = game->jokers[sel];
+                draw_string_shadow(fb, 10, 120, j->name, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+                draw_string(fb, 90, 120, joker_get_rarity_name(j->rarity), COLOR_CHIPS_BLUE);
+                draw_string_wrapped(fb, 10, 132, 134, joker_get_description(j->id), COLOR_TEXT_WHITE);
+
+                // Confirm Sell Button
+                draw_rounded_panel(fb, 150, 122, 98, 58, COLOR_RGB(28, 4, 6), COLOR_MULT_RED);
+                draw_string(fb, 160, 130, "CONFIRM SELL", COLOR_TEXT_WHITE);
+                char val_str[16];
+                sprintf(val_str, "+$%d CASH", (int)j->sell_value);
+                draw_string_shadow(fb, 168, 148, val_str, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+                draw_string(fb, 162, 164, "[TAP TO SELL]", COLOR_TEXT_WHITE);
+            } else if (sel >= 5 && (sel - 5) < game->consumable_count && game->consumables[sel - 5].type != CONSUMABLE_NONE) {
+                const Consumable* c = &game->consumables[sel - 5];
+                draw_string_shadow(fb, 10, 120, c->name, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+                draw_string_wrapped(fb, 10, 132, 134, c->description, COLOR_TEXT_WHITE);
+
+                // Confirm Sell Button
+                draw_rounded_panel(fb, 150, 122, 98, 58, COLOR_RGB(28, 4, 6), COLOR_MULT_RED);
+                draw_string(fb, 160, 130, "CONFIRM SELL", COLOR_TEXT_WHITE);
+                draw_string_shadow(fb, 172, 148, "+$1 CASH", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+                draw_string(fb, 162, 164, "[TAP TO SELL]", COLOR_TEXT_WHITE);
+            } else {
+                draw_string_shadow(fb, 12, 122, "INSPECT OR SELL ITEMS", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+                draw_string(fb, 12, 136, "Tap an owned Joker or Consumable above to view", COLOR_TEXT_WHITE);
+                draw_string(fb, 12, 146, "its full rules and sell value.", COLOR_TEXT_WHITE);
+
+                draw_rounded_panel(fb, 36, 160, 176, 22, COLOR_RGB(4, 26, 10), COLOR_GOLD_COIN);
+                draw_string_shadow(fb, 50, 166, "DONE - RETURN TO SHOP", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+            }
             return;
         }
     }
 
     // --- State: Booster Opening ---
     if (game->current_state == STATE_BOOSTER_OPEN) {
-        draw_rounded_panel(fb, 14, 8, 228, 24, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-        draw_string_shadow(fb, 48, 14, "CHOOSE 1 CARD TO ADD TO DECK", COLOR_GOLD_COIN, COLOR_BOX_DARK);
+        draw_rounded_panel(fb, 8, 4, 240, 20, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        draw_string_shadow(fb, 36, 9, "CHOOSE 1 CARD (DETAILS ON TOP)", COLOR_GOLD_COIN, COLOR_BOX_DARK);
 
         for (int i = 0; i < 3; ++i) {
-            int cx = 20 + i * 76;
-            int cy = 46;
+            int cx = 10 + i * 80;
+            int cy = 28;
+            bool is_inspected = (i == game->shop.pack_inspect_idx);
             const ShopSlot* card_slot = &game->shop.pack_cards[i];
-            draw_rounded_panel(fb, cx, cy, 66, 88, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+            if (card_slot->type == SHOP_ITEM_NONE) continue;
 
-            if (card_slot->type == SHOP_ITEM_TAROT || card_slot->type == SHOP_ITEM_PLANET) {
-                renderer_draw_consumable_sprite(fb, cx + 20, cy + 8, &card_slot->data.consumable, false);
-                draw_string(fb, cx + 4, cy + 48, card_slot->data.consumable.name, COLOR_TEXT_WHITE);
-            } else if (card_slot->type == SHOP_ITEM_JOKER) {
-                renderer_draw_joker_sprite(fb, cx + 20, cy + 8, &card_slot->data.joker, false);
-                draw_string(fb, cx + 4, cy + 48, card_slot->data.joker.name, COLOR_TEXT_WHITE);
+            draw_rounded_panel(fb, cx, cy, 74, 112, COLOR_BOX_DARK, is_inspected ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
+            if (is_inspected) {
+                draw_outline_rect(fb, cx + 1, cy + 1, 72, 110, COLOR_GOLD_COIN);
             }
 
-            draw_rounded_panel(fb, cx + 8, cy + 66, 50, 16, COLOR_RGB(4, 20, 8), COLOR_GOLD_COIN);
-            draw_string(fb, cx + 14, cy + 70, "SELECT", COLOR_GOLD_COIN);
+            if (card_slot->type == SHOP_ITEM_TAROT || card_slot->type == SHOP_ITEM_PLANET) {
+                renderer_draw_consumable_sprite(fb, cx + 24, cy + 6, &card_slot->data.consumable, is_inspected);
+                draw_string_clipped(fb, cx + 4, cy + 46, 66, card_slot->data.consumable.name, COLOR_GOLD_COIN);
+                const char* ctype = (card_slot->type == SHOP_ITEM_TAROT ? "Tarot Card" : "Planet Card");
+                draw_string(fb, cx + 4, cy + 58, ctype, COLOR_TEXT_WHITE);
+            } else if (card_slot->type == SHOP_ITEM_JOKER) {
+                renderer_draw_joker_sprite(fb, cx + 24, cy + 6, &card_slot->data.joker, is_inspected);
+                draw_string_clipped(fb, cx + 4, cy + 46, 66, card_slot->data.joker.name, COLOR_GOLD_COIN);
+                draw_string(fb, cx + 4, cy + 58, joker_get_rarity_name(card_slot->data.joker.rarity), COLOR_CHIPS_BLUE);
+            }
+
+            // Big Action Button at bottom of card
+            uint16_t b_col = is_inspected ? COLOR_RGB(4, 24, 8) : COLOR_RGB(8, 8, 8);
+            uint16_t b_border = is_inspected ? COLOR_GOLD_COIN : COLOR_BOX_BORDER;
+            draw_rounded_panel(fb, cx + 4, cy + 78, 66, 28, b_col, b_border);
+            draw_string(fb, cx + 8, cy + 83, is_inspected ? "[PICK (A)]" : "INSPECT", is_inspected ? COLOR_GOLD_COIN : COLOR_TEXT_WHITE);
+            draw_string(fb, cx + 12, cy + 93, is_inspected ? "CONFIRM" : "TAP HERE", is_inspected ? COLOR_TEXT_WHITE : COLOR_RGB(14, 18, 14));
         }
 
-        draw_rounded_panel(fb, 76, 148, 104, 34, COLOR_RGB(16, 4, 6), COLOR_MULT_RED);
-        draw_string_shadow(fb, 100, 158, "SKIP PACK", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        draw_rounded_panel(fb, 76, 148, 104, 36, COLOR_RGB(16, 4, 6), COLOR_MULT_RED);
+        draw_string_shadow(fb, 98, 155, "SKIP PACK", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+        draw_string(fb, 102, 168, "Press (B)", COLOR_RGB(24, 18, 18));
         return;
     }
 
     // --- State: Active Round & Scoring Controls ---
+    // If inspecting Jokers during active round:
+    if (game->current_state == STATE_ROUND_ACTIVE && game->inspecting_jokers) {
+        // Top Bar
+        draw_rounded_panel(fb, 4, 3, 98, 20, COLOR_RGB(4, 26, 12), COLOR_GOLD_COIN);
+        draw_string(fb, 8, 8, "< BACK TO HAND", COLOR_GOLD_COIN);
+
+        draw_string_shadow(fb, 108, 8, "JOKER INSPECTOR", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+
+        char jk_cnt[16];
+        sprintf(jk_cnt, "(%d/5)", game->joker_count);
+        draw_string(fb, 218, 8, jk_cnt, COLOR_GOLD_COIN);
+
+        // 5 Joker Slots across the top
+        for (int j = 0; j < 5; ++j) {
+            int jx = 4 + j * 50;
+            int jy = 26;
+            bool is_sel = (j == game->inspected_joker_idx);
+            uint16_t b_col = is_sel ? COLOR_GOLD_COIN : COLOR_BOX_BORDER;
+            draw_rounded_panel(fb, jx, jy, 48, 48, COLOR_BOX_DARK, b_col);
+
+            if (j < game->joker_count && game->jokers[j]) {
+                renderer_draw_joker_sprite(fb, jx + 11, jy + 2, game->jokers[j], false);
+                char sname[8];
+                strncpy(sname, game->jokers[j]->name, 6);
+                sname[6] = '\0';
+                draw_string(fb, jx + 4, jy + 38, sname, is_sel ? COLOR_GOLD_COIN : COLOR_TEXT_WHITE);
+            } else {
+                draw_string(fb, jx + 8, jy + 18, "(EMPTY)", COLOR_RGB(8, 14, 10));
+            }
+        }
+
+        // Selected Joker Detailed Info Panel (y = 78 to y = 152)
+        draw_rounded_panel(fb, 4, 78, 248, 76, COLOR_BOX_DARK, COLOR_GOLD_COIN);
+        int idx = game->inspected_joker_idx;
+        if (idx >= 0 && idx < game->joker_count && game->jokers[idx]) {
+            const Joker* j = game->jokers[idx];
+            draw_string_shadow(fb, 10, 82, j->name, COLOR_GOLD_COIN, COLOR_BOX_DARK);
+
+            uint16_t r_col = (j->rarity == RARITY_COMMON ? COLOR_CHIPS_BLUE : (j->rarity == RARITY_UNCOMMON ? COLOR_RGB(6, 26, 12) : COLOR_MULT_RED));
+            draw_string(fb, 116, 82, joker_get_rarity_name(j->rarity), r_col);
+
+            if (j->edition == EDITION_FOIL) draw_string(fb, 180, 82, "FOIL (+50C)", COLOR_CHIPS_BLUE);
+            else if (j->edition == EDITION_HOLOGRAPHIC) draw_string(fb, 180, 82, "HOLO (+10M)", COLOR_MULT_RED);
+            else if (j->edition == EDITION_POLYCHROME) draw_string(fb, 180, 82, "POLY (x1.5M)", COLOR_RGB(24, 12, 31));
+
+            draw_string_wrapped(fb, 10, 94, 236, joker_get_description(j->id), COLOR_TEXT_WHITE);
+
+            char stat_line[48];
+            sprintf(stat_line, "Position %d/5  |  Sell: $%d", idx + 1, (int)j->sell_value);
+            draw_string(fb, 10, 140, stat_line, COLOR_RGB(18, 24, 20));
+        } else {
+            draw_string_shadow(fb, 10, 84, "Empty Joker Slot", COLOR_TEXT_WHITE, COLOR_BOX_DARK);
+            draw_string(fb, 10, 102, "You can have up to 5 Jokers in your active build.", COLOR_RGB(16, 22, 18));
+            draw_string(fb, 10, 116, "Visit the Shop between blinds to buy new Jokers.", COLOR_RGB(16, 22, 18));
+        }
+
+        // Reorder and Action Buttons at y = 158 to y = 188
+        bool can_move_l = (idx > 0 && idx < game->joker_count);
+        draw_rounded_panel(fb, 4, 158, 76, 28, can_move_l ? COLOR_RGB(6, 18, 28) : COLOR_RGB(6, 6, 6), can_move_l ? COLOR_CHIPS_BLUE : COLOR_BOX_BORDER);
+        draw_string(fb, 10, 167, "< MOVE L", can_move_l ? COLOR_TEXT_WHITE : COLOR_RGB(14, 14, 14));
+
+        bool can_move_r = (idx >= 0 && idx < game->joker_count - 1);
+        draw_rounded_panel(fb, 84, 158, 76, 28, can_move_r ? COLOR_RGB(6, 18, 28) : COLOR_RGB(6, 6, 6), can_move_r ? COLOR_CHIPS_BLUE : COLOR_BOX_BORDER);
+        draw_string(fb, 92, 167, "MOVE R >", can_move_r ? COLOR_TEXT_WHITE : COLOR_RGB(14, 14, 14));
+
+        draw_rounded_panel(fb, 164, 158, 88, 28, COLOR_RGB(4, 26, 12), COLOR_GOLD_COIN);
+        draw_string(fb, 170, 167, "< BACK (B)", COLOR_GOLD_COIN);
+        return;
+    }
+
     // 1. Top Controls Bar (Sort buttons, Consumable Slots, Use/Sell buttons)
     draw_rounded_panel(fb, 4, 4, 54, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER);
     draw_string(fb, 10, 9, "SORT:RNK", COLOR_TEXT_WHITE);
@@ -842,15 +1241,9 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
         Consumable* sc = (Consumable*)&game->consumables[sel_consumable];
         bool can_use = consumable_can_use(sc, sel_count);
 
-        // Info below sort buttons
+        // Info below sort buttons - show name and full description
         draw_string(fb, 4, 25, sc->name, COLOR_GOLD_COIN);
-        if (sc->min_selected > 0) {
-            char req_str[24];
-            sprintf(req_str, "Req: %d-%d cards", sc->min_selected, sc->max_selected);
-            draw_string(fb, 4, 34, req_str, can_use ? COLOR_TEXT_WHITE : COLOR_DIAMOND_ORANGE);
-        } else {
-            draw_string(fb, 4, 34, "Instant use", COLOR_TEXT_WHITE);
-        }
+        draw_string_wrapped(fb, 4, 34, 114, sc->description, COLOR_TEXT_WHITE);
 
         // [USE CARD] Button at (186, 2)
         uint16_t use_bg = can_use ? COLOR_RGB(4, 24, 8) : COLOR_RGB(8, 8, 8);
@@ -862,15 +1255,17 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
         draw_rounded_panel(fb, 186, 22, 66, 18, COLOR_RGB(24, 4, 6), COLOR_MULT_RED);
         draw_string(fb, 196, 27, "SELL $1", COLOR_TEXT_WHITE);
     } else {
+        // Show JOKER inspect and SELECT prompt when no consumable selected
         draw_string(fb, 6, 26, "SELECT 1-5 CARDS", COLOR_RGB(14, 22, 16));
 
+        // Interactive Jokers Inspector Button
+        draw_rounded_panel(fb, 178, 2, 74, 18, COLOR_BOX_DARK, COLOR_GOLD_COIN);
         char j_badge[16];
         sprintf(j_badge, "JOKERS: %d/5", game->joker_count);
-        draw_string(fb, 186, 7, j_badge, COLOR_TEXT_WHITE);
+        draw_string(fb, 182, 7, j_badge, COLOR_GOLD_COIN);
 
-        char d_badge[16];
-        sprintf(d_badge, "DECK: %d", game->deck.draw_pile.count);
-        draw_string(fb, 186, 23, d_badge, COLOR_GOLD_COIN);
+        draw_rounded_panel(fb, 178, 22, 74, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER);
+        draw_string(fb, 186, 27, "[INSPECT]", COLOR_TEXT_WHITE);
     }
 
     // 2. Playing Cards in Hand (Centered & 28x40 Crisp Graphics)
@@ -886,8 +1281,16 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
 
         // Lift card if selected, or if scoring in animation
         if (game->current_state == STATE_ROUND_SCORING) {
-            if (i == (game->scoring_step - 1)) cy = base_y - 20; // Active scoring card pops up!
-            else if (game->deck.hand.cards[i].is_selected) cy = base_y - 14;
+            if (game->deck.hand.cards[i].is_selected) {
+                cy = base_y - 14;
+                int c_idx = game->scoring_step - 1;
+                if (c_idx >= 0 && c_idx < game->last_eval.scoring_count) {
+                    const Card* active = game->last_eval.scoring_cards[c_idx];
+                    if (&game->deck.hand.cards[i] == active) {
+                        cy = base_y - 20;
+                    }
+                }
+            }
         } else if (game->deck.hand.cards[i].is_selected) {
             cy = base_y - 14;
         }

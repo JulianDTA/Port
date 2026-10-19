@@ -7,6 +7,8 @@ void shop_generate(ShopState* shop, uint32_t seed, int ante) {
     if (!shop) return;
     memset(shop, 0, sizeof(ShopState));
     shop->reroll_cost = 5;
+    shop->selected_shop_item = 0;
+    shop->sell_inspect_idx = -1;
 
     // Slot 0: Joker
     shop->slots[0].type = SHOP_ITEM_JOKER;
@@ -89,6 +91,7 @@ bool shop_buy_pack(GameSession* game) {
     game->shop.pack_slot.is_sold = true;
     game->shop.pack_opened = true;
     game->shop.active_pack = game->shop.pack_slot.data.pack_type;
+    game->shop.pack_inspect_idx = 0;
     game->current_state = STATE_BOOSTER_OPEN;
 
     // Generate 3 choices based on pack type
@@ -178,3 +181,46 @@ bool shop_reroll(GameSession* game) {
     shop_generate(&game->shop, game->rng_state, game->ante);
     return true;
 }
+
+const char* shop_get_voucher_name(VoucherId id) {
+    switch (id) {
+        case VOUCHER_OVERSTOCK:      return "Overstock";
+        case VOUCHER_CLEARANCE_SALE: return "Clearance Sale";
+        case VOUCHER_GRABBER:        return "Grabber";
+        case VOUCHER_WASTEful:       return "Wasteful";
+        case VOUCHER_SEED_MONEY:     return "Seed Money";
+        default:                     return "Voucher";
+    }
+}
+
+const char* shop_get_voucher_description(VoucherId id) {
+    switch (id) {
+        case VOUCHER_OVERSTOCK:      return "+1 card slot in shop";
+        case VOUCHER_CLEARANCE_SALE: return "All shop items 25% off";
+        case VOUCHER_GRABBER:        return "+1 permanent hand/round";
+        case VOUCHER_WASTEful:       return "+1 permanent discard/round";
+        case VOUCHER_SEED_MONEY:     return "Max interest raised to $10";
+        default:                     return "Permanent upgrade";
+    }
+}
+
+const char* shop_get_pack_name(PackType type) {
+    switch (type) {
+        case PACK_ARCANA:    return "Arcana Pack";
+        case PACK_CELESTIAL: return "Celestial Pack";
+        case PACK_BUFFOON:   return "Buffoon Pack";
+        case PACK_STANDARD:  return "Standard Pack";
+        default:             return "Booster Pack";
+    }
+}
+
+const char* shop_get_pack_description(PackType type) {
+    switch (type) {
+        case PACK_ARCANA:    return "Pick 1 of 3 Tarot cards";
+        case PACK_CELESTIAL: return "Pick 1 of 3 Planet cards";
+        case PACK_BUFFOON:   return "Pick 1 of 2 Joker cards";
+        case PACK_STANDARD:  return "Pick 1 of 3 Playing cards";
+        default:             return "Choose 1 bonus card";
+    }
+}
+

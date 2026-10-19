@@ -105,76 +105,122 @@ int main(int argc, char* argv[]) {
 
             // State: Round Active
             if (game.current_state == STATE_ROUND_ACTIVE) {
-                // 1. Sort Buttons
-                if (tx >= 2 && tx <= 58 && ty >= 2 && ty <= 24) {
-                    deck_sort_by_rank(&game.deck);
-                    game_update_selection_preview(&game);
-                    need_redraw = true;
-                } else if (tx >= 60 && tx <= 118 && ty >= 2 && ty <= 24) {
-                    deck_sort_by_suit(&game.deck);
-                    game_update_selection_preview(&game);
-                    need_redraw = true;
-                }
-                // 2. Consumable Slot 0
-                else if (tx >= 120 && tx <= 152 && ty >= 2 && ty <= 40) {
-                    if (game.consumables[0].type != CONSUMABLE_NONE) {
-                        if (game.selected_consumable_slot == 0) game.selected_consumable_slot = -1;
-                        else game.selected_consumable_slot = 0;
+                if (game.inspecting_jokers) {
+                    // Back to Hand (Top back button or bottom back button)
+                    if ((tx >= 4 && tx <= 104 && ty >= 2 && ty <= 24) ||
+                        (tx >= 160 && tx <= 254 && ty >= 154 && ty <= 188)) {
+                        game.inspecting_jokers = false;
                         need_redraw = true;
                     }
-                }
-                // 3. Consumable Slot 1
-                else if (tx >= 152 && tx <= 184 && ty >= 2 && ty <= 40) {
-                    if (game.consumables[1].type != CONSUMABLE_NONE) {
-                        if (game.selected_consumable_slot == 1) game.selected_consumable_slot = -1;
-                        else game.selected_consumable_slot = 1;
-                        need_redraw = true;
-                    }
-                }
-                // 4. [USE CARD] Button
-                else if (game.selected_consumable_slot >= 0 && tx >= 184 && tx <= 254 && ty >= 2 && ty <= 20) {
-                    if (consumable_use(&game, game.selected_consumable_slot)) {
-                        need_redraw = true;
-                    }
-                }
-                // 5. [SELL $1] Button
-                else if (game.selected_consumable_slot >= 0 && tx >= 184 && tx <= 254 && ty >= 21 && ty <= 40) {
-                    if (game_sell_consumable(&game, game.selected_consumable_slot)) {
-                        need_redraw = true;
-                    }
-                }
-                // 6. Cards in Hand
-                else if (ty >= 44 && ty <= 130) {
-                    int count = game.deck.hand.count;
-                    int total_w = count * 31 - 3;
-                    int start_x = (DS_SCREEN_W - total_w) / 2;
-                    if (start_x < 2) start_x = 2;
-
-                    for (int i = 0; i < count; ++i) {
-                        int cx = start_x + (i * 31);
-                        if (tx >= cx - 2 && tx <= cx + 29) {
-                            const Card* sel[5];
-                            int sel_cnt = deck_get_selected_cards(&game.deck, sel);
-                            if (game.deck.hand.cards[i].is_selected) {
-                                game.deck.hand.cards[i].is_selected = false;
-                                game_update_selection_preview(&game);
+                    // Tap on 5 Joker Slots (y = 24 to 76)
+                    else if (ty >= 24 && ty <= 76) {
+                        for (int j = 0; j < 5; ++j) {
+                            int jx = 4 + j * 50;
+                            if (tx >= jx && tx <= jx + 48) {
+                                game.inspected_joker_idx = j;
                                 need_redraw = true;
-                            } else if (sel_cnt < 5) {
-                                game.deck.hand.cards[i].is_selected = true;
-                                game_update_selection_preview(&game);
-                                need_redraw = true;
+                                break;
                             }
-                            break;
                         }
                     }
-                }
-                // 7. [PLAY HAND] Button
-                else if (tx >= 6 && tx <= 126 && ty >= 134 && ty <= 188) {
-                    if (game_play_selected_hand(&game)) need_redraw = true;
-                }
-                // 8. [DISCARD] Button
-                else if (tx >= 130 && tx <= 250 && ty >= 134 && ty <= 188) {
-                    if (game_discard_selected_cards(&game)) need_redraw = true;
+                    // Move Left (< MOVE L)
+                    else if (tx >= 4 && tx <= 82 && ty >= 154 && ty <= 188) {
+                        if (game.inspected_joker_idx > 0 && game.inspected_joker_idx < game.joker_count) {
+                            game_swap_jokers(&game, game.inspected_joker_idx, game.inspected_joker_idx - 1);
+                            game.inspected_joker_idx--;
+                            need_redraw = true;
+                        }
+                    }
+                    // Move Right (MOVE R >)
+                    else if (tx >= 84 && tx <= 160 && ty >= 154 && ty <= 188) {
+                        if (game.inspected_joker_idx >= 0 && game.inspected_joker_idx < game.joker_count - 1) {
+                            game_swap_jokers(&game, game.inspected_joker_idx, game.inspected_joker_idx + 1);
+                            game.inspected_joker_idx++;
+                            need_redraw = true;
+                        }
+                    }
+                } else {
+                    // Tap on JOKERS / INSPECT button (top right)
+                    if (tx >= 174 && tx <= 254 && ty >= 2 && ty <= 42) {
+                        game.inspecting_jokers = true;
+                        game.inspected_joker_idx = 0;
+                        need_redraw = true;
+                    }
+                    // 1. Sort Buttons
+                    else if (tx >= 2 && tx <= 58 && ty >= 2 && ty <= 24) {
+                        for (int ci = 0; ci < game.deck.hand.count; ++ci) game.deck.hand.cards[ci].is_selected = false;
+                        game.selected_consumable_slot = -1;
+                        deck_sort_by_rank(&game.deck);
+                        game_update_selection_preview(&game);
+                        need_redraw = true;
+                    } else if (tx >= 60 && tx <= 118 && ty >= 2 && ty <= 24) {
+                        for (int ci = 0; ci < game.deck.hand.count; ++ci) game.deck.hand.cards[ci].is_selected = false;
+                        game.selected_consumable_slot = -1;
+                        deck_sort_by_suit(&game.deck);
+                        game_update_selection_preview(&game);
+                        need_redraw = true;
+                    }
+                    // 2. Consumable Slot 0
+                    else if (tx >= 120 && tx <= 152 && ty >= 2 && ty <= 40) {
+                        if (game.consumables[0].type != CONSUMABLE_NONE) {
+                            if (game.selected_consumable_slot == 0) game.selected_consumable_slot = -1;
+                            else game.selected_consumable_slot = 0;
+                            need_redraw = true;
+                        }
+                    }
+                    // 3. Consumable Slot 1
+                    else if (tx >= 152 && tx <= 184 && ty >= 2 && ty <= 40) {
+                        if (game.consumables[1].type != CONSUMABLE_NONE) {
+                            if (game.selected_consumable_slot == 1) game.selected_consumable_slot = -1;
+                            else game.selected_consumable_slot = 1;
+                            need_redraw = true;
+                        }
+                    }
+                    // 4. [USE CARD] Button
+                    else if (game.selected_consumable_slot >= 0 && tx >= 184 && tx <= 254 && ty >= 2 && ty <= 20) {
+                        if (consumable_use(&game, game.selected_consumable_slot)) {
+                            need_redraw = true;
+                        }
+                    }
+                    // 5. [SELL $1] Button
+                    else if (game.selected_consumable_slot >= 0 && tx >= 184 && tx <= 254 && ty >= 21 && ty <= 40) {
+                        if (game_sell_consumable(&game, game.selected_consumable_slot)) {
+                            need_redraw = true;
+                        }
+                    }
+                    // 6. Cards in Hand
+                    else if (ty >= 44 && ty <= 130) {
+                        int count = game.deck.hand.count;
+                        int total_w = count * 31 - 3;
+                        int start_x = (DS_SCREEN_W - total_w) / 2;
+                        if (start_x < 2) start_x = 2;
+
+                        for (int i = 0; i < count; ++i) {
+                            int cx = start_x + (i * 31);
+                            if (tx >= cx - 2 && tx <= cx + 29) {
+                                const Card* sel[5];
+                                int sel_cnt = deck_get_selected_cards(&game.deck, sel);
+                                if (game.deck.hand.cards[i].is_selected) {
+                                    game.deck.hand.cards[i].is_selected = false;
+                                    game_update_selection_preview(&game);
+                                    need_redraw = true;
+                                } else if (sel_cnt < 5) {
+                                    game.deck.hand.cards[i].is_selected = true;
+                                    game_update_selection_preview(&game);
+                                    need_redraw = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    // 7. [PLAY HAND] Button
+                    else if (tx >= 6 && tx <= 126 && ty >= 134 && ty <= 188) {
+                        if (game_play_selected_hand(&game)) need_redraw = true;
+                    }
+                    // 8. [DISCARD] Button
+                    else if (tx >= 130 && tx <= 250 && ty >= 134 && ty <= 188) {
+                        if (game_discard_selected_cards(&game)) need_redraw = true;
+                    }
                 }
             }
             // State: Round Victory (Cash Out)
@@ -187,70 +233,114 @@ int main(int argc, char* argv[]) {
             // State: The Shop
             else if (game.current_state == STATE_SHOP) {
                 if (!game.shop.show_inventory) {
-                    // Buy Slot 0 (Joker)
-                    if (tx >= 6 && tx <= 80 && ty >= 8 && ty <= 90) {
-                        if (shop_buy_card_slot(&game, 0)) need_redraw = true;
+                    // Slot 0 (Joker)
+                    if (tx >= 4 && tx <= 82 && ty >= 4 && ty <= 90) {
+                        game.shop.selected_shop_item = 0;
+                        if (ty >= 62) {
+                            shop_buy_card_slot(&game, 0);
+                        }
+                        need_redraw = true;
                     }
-                    // Buy Slot 1 (Tarot/Planet)
-                    else if (tx >= 82 && tx <= 156 && ty >= 8 && ty <= 90) {
-                        if (shop_buy_card_slot(&game, 1)) need_redraw = true;
+                    // Slot 1 (Tarot/Planet)
+                    else if (tx >= 84 && tx <= 164 && ty >= 4 && ty <= 90) {
+                        game.shop.selected_shop_item = 1;
+                        if (ty >= 62) {
+                            shop_buy_card_slot(&game, 1);
+                        }
+                        need_redraw = true;
                     }
-                    // Open Booster Pack
-                    else if (tx >= 158 && tx <= 250 && ty >= 8 && ty <= 90) {
-                        if (shop_buy_pack(&game)) need_redraw = true;
+                    // Booster Pack
+                    else if (tx >= 166 && tx <= 252 && ty >= 4 && ty <= 90) {
+                        game.shop.selected_shop_item = 2;
+                        if (ty >= 62) {
+                            shop_buy_pack(&game);
+                        }
+                        need_redraw = true;
                     }
-                    // Buy Voucher
-                    else if (tx >= 6 && tx <= 156 && ty >= 92 && ty <= 136) {
-                        if (shop_buy_voucher(&game)) need_redraw = true;
+                    // Voucher
+                    else if (tx >= 4 && tx <= 164 && ty >= 92 && ty <= 136) {
+                        game.shop.selected_shop_item = 3;
+                        if (ty >= 118) {
+                            shop_buy_voucher(&game);
+                        }
+                        need_redraw = true;
                     }
                     // Open Inventory Sell Screen
-                    else if (tx >= 158 && tx <= 250 && ty >= 92 && ty <= 136) {
+                    else if (tx >= 166 && tx <= 252 && ty >= 92 && ty <= 136) {
                         game.shop.show_inventory = true;
+                        game.shop.sell_inspect_idx = -1;
                         need_redraw = true;
                     }
                     // Reroll Shop
-                    else if (tx >= 6 && tx <= 120 && ty >= 138 && ty <= 188) {
+                    else if (tx >= 4 && tx <= 122 && ty >= 138 && ty <= 188) {
                         if (shop_reroll(&game)) need_redraw = true;
                     }
                     // Next Blind
-                    else if (tx >= 122 && tx <= 250 && ty >= 138 && ty <= 188) {
+                    else if (tx >= 124 && tx <= 252 && ty >= 138 && ty <= 188) {
                         game_advance_next_blind(&game);
                         need_redraw = true;
                     }
                 } else {
                     // Back to Shop / Done Button
                     if ((tx >= 4 && tx <= 104 && ty >= 2 && ty <= 26) ||
-                        (tx >= 20 && tx <= 236 && ty >= 150 && ty <= 188)) {
+                        (game.shop.sell_inspect_idx < 0 && tx >= 20 && tx <= 236 && ty >= 150 && ty <= 188)) {
                         game.shop.show_inventory = false;
                         need_redraw = true;
                     }
-                    // Sell Jokers (5 slots)
-                    for (int j = 0; j < 5; ++j) {
-                        int jx = 4 + j * 50;
-                        if (tx >= jx && tx <= jx + 48 && ty >= 36 && ty <= 90) {
-                            if (game_sell_joker(&game, j)) need_redraw = true;
-                            break;
+                    // Select Jokers (5 slots at y = 24 to 76)
+                    else if (ty >= 24 && ty <= 76) {
+                        for (int j = 0; j < 5; ++j) {
+                            int jx = 4 + j * 50;
+                            if (tx >= jx && tx <= jx + 48) {
+                                if (j < game.joker_count) game.shop.sell_inspect_idx = j;
+                                need_redraw = true;
+                                break;
+                            }
                         }
                     }
-                    // Sell Consumables (2 slots)
-                    for (int c = 0; c < 2; ++c) {
-                        int cx = 8 + c * 124;
-                        if (tx >= cx && tx <= cx + 116 && ty >= 104 && ty <= 148) {
-                            if (game_sell_consumable(&game, c)) need_redraw = true;
-                            break;
+                    // Select Consumables (2 slots at y = 76 to 114)
+                    else if (ty >= 76 && ty <= 114) {
+                        for (int c = 0; c < 2; ++c) {
+                            int cx = 4 + c * 124;
+                            if (tx >= cx && tx <= cx + 120) {
+                                if (c < game.consumable_count && game.consumables[c].type != CONSUMABLE_NONE) {
+                                    game.shop.sell_inspect_idx = c + 5;
+                                }
+                                need_redraw = true;
+                                break;
+                            }
+                        }
+                    }
+                    // Confirm Sell Button (y = 120 to 184, x >= 148)
+                    else if (tx >= 148 && tx <= 252 && ty >= 120 && ty <= 184) {
+                        if (game.shop.sell_inspect_idx >= 0 && game.shop.sell_inspect_idx < 5) {
+                            game_sell_joker(&game, game.shop.sell_inspect_idx);
+                            game.shop.sell_inspect_idx = -1;
+                            need_redraw = true;
+                        } else if (game.shop.sell_inspect_idx >= 5) {
+                            game_sell_consumable(&game, game.shop.sell_inspect_idx - 5);
+                            game.shop.sell_inspect_idx = -1;
+                            need_redraw = true;
                         }
                     }
                 }
             }
             // State: Booster Pack Open
             else if (game.current_state == STATE_BOOSTER_OPEN) {
-                if (tx >= 16 && tx <= 88 && ty >= 44 && ty <= 136) {
-                    if (shop_choose_pack_card(&game, 0)) need_redraw = true;
-                } else if (tx >= 92 && tx <= 164 && ty >= 44 && ty <= 136) {
-                    if (shop_choose_pack_card(&game, 1)) need_redraw = true;
-                } else if (tx >= 168 && tx <= 240 && ty >= 44 && ty <= 136) {
-                    if (shop_choose_pack_card(&game, 2)) need_redraw = true;
-                } else if (tx >= 72 && tx <= 184 && ty >= 144 && ty <= 186) {
+                if (ty >= 26 && ty <= 144) {
+                    for (int i = 0; i < 3; ++i) {
+                        int cx = 10 + i * 80;
+                        if (tx >= cx && tx <= cx + 74) {
+                            if (game.shop.pack_inspect_idx == i || ty >= 104) {
+                                if (shop_choose_pack_card(&game, i)) need_redraw = true;
+                            } else {
+                                game.shop.pack_inspect_idx = i;
+                                need_redraw = true;
+                            }
+                            break;
+                        }
+                    }
+                } else if (tx >= 72 && tx <= 184 && ty >= 146 && ty <= 188) {
                     game.current_state = STATE_SHOP; // Skip pack
                     need_redraw = true;
                 }
@@ -272,7 +362,14 @@ int main(int argc, char* argv[]) {
                 game_finish_scoring(&game);
                 need_redraw = true;
             } else if (game.current_state == STATE_ROUND_ACTIVE) {
-                if (game_play_selected_hand(&game)) need_redraw = true;
+                if (game.inspecting_jokers) {
+                    game.inspecting_jokers = false;
+                    need_redraw = true;
+                } else if (game.selected_consumable_slot >= 0) {
+                    if (consumable_use(&game, game.selected_consumable_slot)) need_redraw = true;
+                } else {
+                    if (game_play_selected_hand(&game)) need_redraw = true;
+                }
             } else if (game.current_state == STATE_ROUND_VICTORY) {
                 game_advance_to_shop(&game);
                 need_redraw = true;
@@ -283,6 +380,10 @@ int main(int argc, char* argv[]) {
                     game_advance_next_blind(&game);
                 }
                 need_redraw = true;
+            } else if (game.current_state == STATE_BOOSTER_OPEN) {
+                if (shop_choose_pack_card(&game, game.shop.pack_inspect_idx)) {
+                    need_redraw = true;
+                }
             } else if (game.current_state == STATE_GAME_OVER) {
                 game_session_start_run(&game);
                 game_update_selection_preview(&game);
@@ -290,32 +391,98 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Button B: Discard (or Back from Shop Inventory)
+        // Button B: Discard (or Back from Joker Inspector / Shop Inventory / Pack)
         if (input.btn_b) {
             if (game.current_state == STATE_ROUND_ACTIVE) {
-                if (game_discard_selected_cards(&game)) need_redraw = true;
+                if (game.inspecting_jokers) {
+                    game.inspecting_jokers = false;
+                    need_redraw = true;
+                } else if (game.selected_consumable_slot >= 0) {
+                    game.selected_consumable_slot = -1;
+                    need_redraw = true;
+                } else {
+                    if (game_discard_selected_cards(&game)) need_redraw = true;
+                }
             } else if (game.current_state == STATE_SHOP && game.shop.show_inventory) {
                 game.shop.show_inventory = false;
+                need_redraw = true;
+            } else if (game.current_state == STATE_BOOSTER_OPEN) {
+                game.current_state = STATE_SHOP; // Skip pack
                 need_redraw = true;
             }
         }
 
-        // Button X / L: Sort Rank
-        if ((input.btn_x || input.btn_l) && game.current_state == STATE_ROUND_ACTIVE) {
-            deck_sort_by_rank(&game.deck);
-            game_update_selection_preview(&game);
+        // Button X or Y: Toggle Joker Inspector during Active Round
+        if ((input.btn_x || input.btn_y) && game.current_state == STATE_ROUND_ACTIVE) {
+            game.inspecting_jokers = !game.inspecting_jokers;
             need_redraw = true;
         }
 
-        // Button Y / R: Sort Suit
-        if ((input.btn_y || input.btn_r) && game.current_state == STATE_ROUND_ACTIVE) {
-            deck_sort_by_suit(&game.deck);
-            game_update_selection_preview(&game);
-            need_redraw = true;
+        // Button L: Move Left in Inspector / Sort Rank in Hand
+        if (input.btn_l && game.current_state == STATE_ROUND_ACTIVE) {
+            if (game.inspecting_jokers) {
+                if (game.inspected_joker_idx > 0 && game.inspected_joker_idx < game.joker_count) {
+                    game_swap_jokers(&game, game.inspected_joker_idx, game.inspected_joker_idx - 1);
+                    game.inspected_joker_idx--;
+                    need_redraw = true;
+                }
+            } else {
+                for (int ci = 0; ci < game.deck.hand.count; ++ci) game.deck.hand.cards[ci].is_selected = false;
+                game.selected_consumable_slot = -1;
+                deck_sort_by_rank(&game.deck);
+                game_update_selection_preview(&game);
+                need_redraw = true;
+            }
+        }
+
+        // Button R: Move Right in Inspector / Sort Suit in Hand
+        if (input.btn_r && game.current_state == STATE_ROUND_ACTIVE) {
+            if (game.inspecting_jokers) {
+                if (game.inspected_joker_idx >= 0 && game.inspected_joker_idx < game.joker_count - 1) {
+                    game_swap_jokers(&game, game.inspected_joker_idx, game.inspected_joker_idx + 1);
+                    game.inspected_joker_idx++;
+                    need_redraw = true;
+                }
+            } else {
+                for (int ci = 0; ci < game.deck.hand.count; ++ci) game.deck.hand.cards[ci].is_selected = false;
+                game.selected_consumable_slot = -1;
+                deck_sort_by_suit(&game.deck);
+                game_update_selection_preview(&game);
+                need_redraw = true;
+            }
+        }
+
+        // D-Pad Left/Right: Navigate Jokers, Shop Items, or Booster Cards
+        if (input.dpad_x != 0) {
+            if (game.current_state == STATE_ROUND_ACTIVE && game.inspecting_jokers) {
+                if (input.dpad_x < 0 && game.inspected_joker_idx > 0) {
+                    game.inspected_joker_idx--;
+                    need_redraw = true;
+                } else if (input.dpad_x > 0 && game.inspected_joker_idx < 4) {
+                    game.inspected_joker_idx++;
+                    need_redraw = true;
+                }
+            } else if (game.current_state == STATE_SHOP && !game.shop.show_inventory) {
+                if (input.dpad_x < 0 && game.shop.selected_shop_item > 0) {
+                    game.shop.selected_shop_item--;
+                    need_redraw = true;
+                } else if (input.dpad_x > 0 && game.shop.selected_shop_item < 3) {
+                    game.shop.selected_shop_item++;
+                    need_redraw = true;
+                }
+            } else if (game.current_state == STATE_BOOSTER_OPEN) {
+                if (input.dpad_x < 0 && game.shop.pack_inspect_idx > 0) {
+                    game.shop.pack_inspect_idx--;
+                    need_redraw = true;
+                } else if (input.dpad_x > 0 && game.shop.pack_inspect_idx < 2) {
+                    game.shop.pack_inspect_idx++;
+                    need_redraw = true;
+                }
+            }
         }
 
         // Button Select: Cycle Consumable selection
-        if (input.btn_select && game.current_state == STATE_ROUND_ACTIVE) {
+        if (input.btn_select && game.current_state == STATE_ROUND_ACTIVE && !game.inspecting_jokers) {
             if (game.consumable_count > 0) {
                 if (game.selected_consumable_slot < 0) {
                     game.selected_consumable_slot = (game.consumables[0].type != CONSUMABLE_NONE) ? 0 : 1;
