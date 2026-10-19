@@ -32,6 +32,7 @@ LIBDIRS     := $(LIBNDS)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 
+export ROOTDIR  := $(CURDIR)
 export OUTPUT   := $(CURDIR)/$(TARGET)
 export VPATH    := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
 export DEPSDIR  := $(CURDIR)/$(BUILD)
@@ -68,6 +69,11 @@ else
 DEPENDS := $(OFILES:.o=.d)
 
 $(OUTPUT).nds: $(OUTPUT).elf
+	@echo [NDSTOOL] Packaging $(notdir $@)...
+	@ndstool -c $@ -9 $< $(_ARM7_ELF) -b $(GAME_ICON) "$(GAME_TITLE);$(GAME_SUBTITLE1);$(GAME_SUBTITLE2)" $(_ADDFILES)
+	@python $(ROOTDIR)/tools/patch_nds_header.py $@
+	@echo [SUCCESS] Built $(notdir $@) for Nintendo DS / DSi / 3DS!
+
 $(OUTPUT).elf: $(OFILES)
 
 -include $(DEPENDS)

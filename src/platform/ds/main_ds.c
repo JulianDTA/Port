@@ -20,6 +20,8 @@ static uint16_t* s_top_fb = NULL;
 static uint16_t* s_sub_fb = NULL;
 
 void hal_init(void) {
+    powerOn(POWER_ALL_2D);
+
     videoSetMode(MODE_5_2D);
     videoSetModeSub(MODE_5_2D);
 
@@ -74,9 +76,13 @@ void hal_wait_vsync(void) {}
 
 int main(int argc, char* argv[]) {
     (void)argc; (void)argv;
+#ifdef ARM9
+    defaultExceptionHandler();
+#endif
     hal_init();
 
-    GameSession game;
+    static GameSession game;
+    memset(&game, 0, sizeof(game));
     game_session_init(&game);
     game_session_start_run(&game);
     game_update_selection_preview(&game);
