@@ -7,7 +7,6 @@ build_ds/
 *.obj
 *.o
 *.elf
-*.nds
 *.d
 
 # Generated graphics headers (rebuild with tools/asset_pipeline.py)
