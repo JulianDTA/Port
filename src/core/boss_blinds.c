@@ -35,13 +35,13 @@ bool boss_blind_is_card_debuffed(BossBlindId id, const Card* card) {
     if (!card) return false;
     switch (id) {
         case BOSS_THE_CLUB:
-            return card->suit == SUIT_CLUBS;
+            return card->suit == SUIT_CLUBS || card->enhancement == ENHANCEMENT_WILD;
         case BOSS_THE_GOAD:
-            return card->suit == SUIT_SPADES;
+            return card->suit == SUIT_SPADES || card->enhancement == ENHANCEMENT_WILD;
         case BOSS_THE_WINDOW:
-            return card->suit == SUIT_DIAMONDS;
+            return card->suit == SUIT_DIAMONDS || card->enhancement == ENHANCEMENT_WILD;
         case BOSS_THE_HEAD:
-            return card->suit == SUIT_HEARTS;
+            return card->suit == SUIT_HEARTS || card->enhancement == ENHANCEMENT_WILD;
         case BOSS_THE_PLANT:
             return card_is_face(card);
         default:

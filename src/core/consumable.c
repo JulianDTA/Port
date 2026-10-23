@@ -221,7 +221,8 @@ bool consumable_use(GameSession* game, int slot_index) {
                 break;
             }
             case TAROT_HANGED_MAN: {
-                deck_remove_selected_from_hand(&game->deck);
+                deck_destroy_selected(&game->deck);
+                deck_draw_up_to_limit(&game->deck);
                 break;
             }
             case TAROT_DEATH: {
@@ -303,6 +304,13 @@ bool consumable_use(GameSession* game, int slot_index) {
     memset(c, 0, sizeof(Consumable));
     if (game->consumable_count > 0) game->consumable_count--;
     game->selected_consumable_slot = -1;
+
+    // Maintain persistent sorting if cards were modified
+    if (game->active_sort_mode == SORT_MODE_RANK) {
+        deck_sort_by_rank(&game->deck);
+    } else if (game->active_sort_mode == SORT_MODE_SUIT) {
+        deck_sort_by_suit(&game->deck);
+    }
 
     // Update live evaluation
     game_update_selection_preview(game);

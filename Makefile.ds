@@ -62,7 +62,7 @@ $(BUILD):
 
 clean:
 	@echo "[CLEAN] Removing build files..."
-	@rm -rf $(BUILD) $(TARGET).elf $(TARGET).nds
+	@rm -rf $(BUILD) $(TARGET).elf $(TARGET).nds $(ROOTDIR)/balatro.nds $(ROOTDIR)/balatro_hb.nds $(BUILD)/balatro_legacy.nds $(BUILD)/balatro_legacy.elf
 
 else
 
@@ -70,9 +70,10 @@ DEPENDS := $(OFILES:.o=.d)
 
 $(OUTPUT).nds: $(OUTPUT).elf
 	@echo [NDSTOOL] Packaging $(notdir $@)...
-	@ndstool -c $@ -9 $< $(_ARM7_ELF) -b $(GAME_ICON) "$(GAME_TITLE);$(GAME_SUBTITLE1);$(GAME_SUBTITLE2)" $(_ADDFILES)
-	@python $(ROOTDIR)/tools/patch_nds_header.py $@
-	@echo [SUCCESS] Built $(notdir $@) for Nintendo DS / DSi / 3DS!
+	@ndstool -c $@ -h 0x200 -9 $< $(_ARM7_ELF) -b $(GAME_ICON) "$(GAME_TITLE);$(GAME_SUBTITLE1);$(GAME_SUBTITLE2)" $(_ADDFILES)
+	@cp -f $@ $(ROOTDIR)/balatro.nds
+	@cp -f $@ $(ROOTDIR)/balatro_hb.nds
+	@echo [SUCCESS] Built $(notdir $@), balatro.nds, and balatro_hb.nds for Nintendo DS / DSi / 3DS!
 
 $(OUTPUT).elf: $(OFILES)
 

@@ -1,5 +1,4 @@
 #include "platform/renderer_ds.h"
-#include "gfx/balatro_deck_gfx.h"
 #include "gfx/balatro_chips_gfx.h"
 #include "gfx/balatro_consumables_gfx.h"
 #include "gfx/balatro_jokers_gfx.h"
@@ -289,41 +288,251 @@ void draw_string_2x_shadow(uint16_t* fb, int x, int y, const char* str, uint16_t
 // Card & Sprite Blitting Helpers
 // -------------------------------------------------------------
 
-void renderer_draw_card_sprite(uint16_t* fb, int x, int y, const Card* card, bool debuffed) {
-    // Drop shadow
-    draw_fill_rect(fb, x + 2, y + 2, BALATRO_CARD_W, BALATRO_CARD_H, COLOR_CARD_SHADOW);
+// 11x11 Central Suit Bitmaps (bit 10 is column 0, bit 0 is column 10)
+static const uint16_t s_suit_central_heart[11] = {
+    0x38E, // Row 0:  .###...###.
+    0x7DF, // Row 1:  #####.#####
+    0x7FF, // Row 2:  ###########
+    0x7FF, // Row 3:  ###########
+    0x7FF, // Row 4:  ###########
+    0x3FE, // Row 5:  .#########.
+    0x1FC, // Row 6:  ..#######..
+    0x0F8, // Row 7:  ...#####...
+    0x070, // Row 8:  ....###....
+    0x020, // Row 9:  .....#.....
+    0x000  // Row 10: ...........
+};
 
-    int suit_row = 0;
-    if (card->suit == SUIT_HEARTS) suit_row = 0;
-    else if (card->suit == SUIT_CLUBS) suit_row = 1;
-    else if (card->suit == SUIT_DIAMONDS) suit_row = 2;
-    else if (card->suit == SUIT_SPADES) suit_row = 3;
+static const uint16_t s_suit_central_diamond[11] = {
+    0x020, // Row 0:  .....#.....
+    0x070, // Row 1:  ....###....
+    0x0F8, // Row 2:  ...#####...
+    0x1FC, // Row 3:  ..#######..
+    0x3FE, // Row 4:  .#########.
+    0x7FF, // Row 5:  ###########
+    0x3FE, // Row 6:  .#########.
+    0x1FC, // Row 7:  ..#######..
+    0x0F8, // Row 8:  ...#####...
+    0x070, // Row 9:  ....###....
+    0x020  // Row 10: .....#.....
+};
 
-    int col = card->rank - 2;
-    if (col < 0) col = 0;
-    if (col > 12) col = 12;
-    int sprite_idx = suit_row * 13 + col;
-    const uint16_t* sprite = s_balatro_cards[sprite_idx];
+static const uint16_t s_suit_central_spade[11] = {
+    0x020, // Row 0:  .....#.....
+    0x070, // Row 1:  ....###....
+    0x0F8, // Row 2:  ...#####...
+    0x1FC, // Row 3:  ..#######..
+    0x3FE, // Row 4:  .#########.
+    0x7FF, // Row 5:  ###########
+    0x7FF, // Row 6:  ###########
+    0x78F, // Row 7:  ####...####
+    0x326, // Row 8:  .##..#..##.
+    0x070, // Row 9:  ....###....
+    0x0F8  // Row 10: ...#####...
+};
 
-    for (int py = 0; py < BALATRO_CARD_H; ++py) {
-        int sy = y + py;
-        if (sy < 0 || sy >= DS_SCREEN_H) continue;
-        uint16_t* row_ptr = &fb[sy * DS_SCREEN_W];
-        for (int px = 0; px < BALATRO_CARD_W; ++px) {
-            int sx = x + px;
-            if (sx < 0 || sx >= DS_SCREEN_W) continue;
-            uint16_t color = sprite[py * BALATRO_CARD_W + px];
-            if (color != 0x0000) {
-                if (debuffed && (px == py || px == (BALATRO_CARD_W - 1 - py))) {
-                    row_ptr[sx] = COLOR_MULT_RED; // Red debuff cross
-                } else {
-                    row_ptr[sx] = color;
+static const uint16_t s_suit_central_club[11] = {
+    0x070, // Row 0:  ....###....
+    0x0F8, // Row 1:  ...#####...
+    0x0F8, // Row 2:  ...#####...
+    0x376, // Row 3:  .##.###.##.
+    0x7FF, // Row 4:  ###########
+    0x7FF, // Row 5:  ###########
+    0x7FF, // Row 6:  ###########
+    0x3AE, // Row 7:  .###.#.###.
+    0x020, // Row 8:  .....#.....
+    0x070, // Row 9:  ....###....
+    0x0F8  // Row 10: ...#####...
+};
+
+// 5x5 Corner Mini-Suit Bitmaps (5 bits: bit 4 is column 0, bit 0 is column 4)
+static const uint8_t s_suit_mini_heart[5]   = { 0x0A, 0x1F, 0x1F, 0x0E, 0x04 };
+static const uint8_t s_suit_mini_diamond[5] = { 0x04, 0x0E, 0x1F, 0x0E, 0x04 };
+static const uint8_t s_suit_mini_spade[5]   = { 0x04, 0x0E, 0x1F, 0x1B, 0x04 };
+static const uint8_t s_suit_mini_club[5]    = { 0x04, 0x1F, 0x1F, 0x04, 0x0E };
+
+static void draw_suit_central(uint16_t* fb, int x, int y, CardSuit suit, uint16_t color) {
+    const uint16_t* pattern = NULL;
+    switch (suit) {
+        case SUIT_HEARTS:   pattern = s_suit_central_heart; break;
+        case SUIT_DIAMONDS: pattern = s_suit_central_diamond; break;
+        case SUIT_SPADES:   pattern = s_suit_central_spade; break;
+        case SUIT_CLUBS:    pattern = s_suit_central_club; break;
+        default: return;
+    }
+    for (int r = 0; r < 11; ++r) {
+        int py = y + r;
+        if (py < 0 || py >= DS_SCREEN_H) continue;
+        uint16_t row_bits = pattern[r];
+        uint16_t* line = &fb[py * DS_SCREEN_W];
+        for (int c = 0; c < 11; ++c) {
+            if (row_bits & (1 << (10 - c))) {
+                int px = x + c;
+                if (px >= 0 && px < DS_SCREEN_W) {
+                    line[px] = color;
                 }
             }
         }
     }
+}
 
-    // Glowing double border if selected
+static void draw_suit_mini(uint16_t* fb, int x, int y, CardSuit suit, uint16_t color) {
+    const uint8_t* pattern = NULL;
+    switch (suit) {
+        case SUIT_HEARTS:   pattern = s_suit_mini_heart; break;
+        case SUIT_DIAMONDS: pattern = s_suit_mini_diamond; break;
+        case SUIT_SPADES:   pattern = s_suit_mini_spade; break;
+        case SUIT_CLUBS:    pattern = s_suit_mini_club; break;
+        default: return;
+    }
+    for (int r = 0; r < 5; ++r) {
+        int py = y + r;
+        if (py < 0 || py >= DS_SCREEN_H) continue;
+        uint8_t row_bits = pattern[r];
+        uint16_t* line = &fb[py * DS_SCREEN_W];
+        for (int c = 0; c < 5; ++c) {
+            if (row_bits & (1 << (4 - c))) {
+                int px = x + c;
+                if (px >= 0 && px < DS_SCREEN_W) {
+                    line[px] = color;
+                }
+            }
+        }
+    }
+}
+
+void renderer_draw_card_sprite(uint16_t* fb, int x, int y, const Card* card, bool debuffed) {
+    if (!fb || !card) return;
+
+    // 1. Drop shadow behind card
+    draw_fill_rect(fb, x + 2, y + 2, BALATRO_CARD_W, BALATRO_CARD_H, COLOR_CARD_SHADOW);
+
+    // 2. Card Background & Border (with rounded corners)
+    uint16_t bg_col = COLOR_CARD_WHITE;
+    uint16_t border_col = COLOR_RGB(10, 14, 12);
+
+    if (card->enhancement == ENHANCEMENT_STEEL) {
+        bg_col = COLOR_RGB(18, 19, 21);
+    } else if (card->enhancement == ENHANCEMENT_GOLD) {
+        bg_col = COLOR_RGB(29, 24, 7);
+    } else if (card->enhancement == ENHANCEMENT_STONE) {
+        bg_col = COLOR_RGB(14, 15, 16);
+    } else if (card->enhancement == ENHANCEMENT_GLASS) {
+        bg_col = COLOR_RGB(26, 29, 31);
+    }
+
+    if (card->edition == EDITION_FOIL) {
+        border_col = COLOR_RGB(24, 26, 28);
+    } else if (card->edition == EDITION_HOLOGRAPHIC) {
+        border_col = COLOR_RGB(10, 26, 31);
+    } else if (card->edition == EDITION_POLYCHROME) {
+        border_col = COLOR_GOLD_COIN;
+    }
+
+    // Outer border (leaving 4 corners transparent for rounded look)
+    draw_fill_rect(fb, x + 1, y, BALATRO_CARD_W - 2, 1, border_col);
+    draw_fill_rect(fb, x + 1, y + BALATRO_CARD_H - 1, BALATRO_CARD_W - 2, 1, border_col);
+    draw_fill_rect(fb, x, y + 1, 1, BALATRO_CARD_H - 2, border_col);
+    draw_fill_rect(fb, x + BALATRO_CARD_W - 1, y + 1, 1, BALATRO_CARD_H - 2, border_col);
+
+    // Card face interior
+    draw_fill_rect(fb, x + 1, y + 1, BALATRO_CARD_W - 2, BALATRO_CARD_H - 2, bg_col);
+
+    // Glass enhancement reflection streak
+    if (card->enhancement == ENHANCEMENT_GLASS) {
+        for (int g = 4; g < BALATRO_CARD_W - 4; ++g) {
+            int gx = x + g;
+            int gy = y + g;
+            if (gx < DS_SCREEN_W && gy < DS_SCREEN_H) {
+                fb[gy * DS_SCREEN_W + gx] = COLOR_TEXT_WHITE;
+            }
+        }
+    }
+
+    // Special Case: Stone card has no rank or suit in Balatro
+    if (card->enhancement == ENHANCEMENT_STONE) {
+        draw_fill_rect(fb, x + 5, y + 6, 2, 1, COLOR_RGB(20, 21, 22));
+        draw_fill_rect(fb, x + 18, y + 8, 2, 1, COLOR_RGB(10, 11, 12));
+        draw_fill_rect(fb, x + 8, y + 28, 2, 1, COLOR_RGB(20, 21, 22));
+        draw_fill_rect(fb, x + 20, y + 32, 2, 1, COLOR_RGB(10, 11, 12));
+        draw_string(fb, x + 5, y + 16, "+50", COLOR_TEXT_WHITE);
+    } else {
+        // Suit Color
+        uint16_t suit_col = COLOR_SPADE_BLACK;
+        if (card->suit == SUIT_HEARTS) suit_col = COLOR_HEART_RED;
+        else if (card->suit == SUIT_DIAMONDS) suit_col = COLOR_DIAMOND_ORANGE;
+        else if (card->suit == SUIT_CLUBS) suit_col = COLOR_CLUB_BLACK;
+        else if (card->suit == SUIT_SPADES) suit_col = COLOR_SPADE_BLACK;
+
+        if (card->enhancement == ENHANCEMENT_STEEL) {
+            if (card->suit == SUIT_SPADES || card->suit == SUIT_CLUBS) suit_col = COLOR_TEXT_WHITE;
+        }
+
+        char rank_char = '?';
+        switch (card->rank) {
+            case 2:  rank_char = '2'; break;
+            case 3:  rank_char = '3'; break;
+            case 4:  rank_char = '4'; break;
+            case 5:  rank_char = '5'; break;
+            case 6:  rank_char = '6'; break;
+            case 7:  rank_char = '7'; break;
+            case 8:  rank_char = '8'; break;
+            case 9:  rank_char = '9'; break;
+            case 10: rank_char = '0'; break;
+            case 11: rank_char = 'J'; break;
+            case 12: rank_char = 'Q'; break;
+            case 13: rank_char = 'K'; break;
+            case 14: rank_char = 'A'; break;
+            default: rank_char = '?'; break;
+        }
+
+        // Top-Left Rank & Mini Suit
+        if (card->rank == 10) {
+            draw_char(fb, x + 1, y + 2, '1', suit_col);
+            draw_char(fb, x + 6, y + 2, '0', suit_col);
+            draw_suit_mini(fb, x + 4, y + 10, card->suit, suit_col);
+        } else {
+            draw_char(fb, x + 3, y + 2, rank_char, suit_col);
+            draw_suit_mini(fb, x + 3, y + 10, card->suit, suit_col);
+        }
+
+        // Central Suit Icon (Crisp single suit symbol)
+        draw_suit_central(fb, x + 8, y + 14, card->suit, suit_col);
+
+        // Bottom-Right Mini Suit & Rank
+        if (card->rank == 10) {
+            draw_suit_mini(fb, x + 19, y + 25, card->suit, suit_col);
+            draw_char(fb, x + 16, y + 31, '1', suit_col);
+            draw_char(fb, x + 21, y + 31, '0', suit_col);
+        } else {
+            draw_suit_mini(fb, x + 20, y + 25, card->suit, suit_col);
+            draw_char(fb, x + 20, y + 31, rank_char, suit_col);
+        }
+    }
+
+    // 3. Card Seal Badge (if present)
+    if (card->seal != SEAL_NONE) {
+        uint16_t seal_col = COLOR_GOLD_COIN;
+        if (card->seal == SEAL_RED) seal_col = COLOR_MULT_RED;
+        else if (card->seal == SEAL_BLUE) seal_col = COLOR_CHIPS_BLUE;
+        else if (card->seal == SEAL_PURPLE) seal_col = COLOR_RGB(24, 8, 30);
+
+        draw_fill_rect(fb, x + 21, y + 2, 4, 4, seal_col);
+        draw_fill_rect(fb, x + 22, y + 3, 2, 2, COLOR_TEXT_WHITE);
+    }
+
+    // 4. Debuffed Cross
+    if (debuffed) {
+        for (int d = 2; d < BALATRO_CARD_W - 2; ++d) {
+            int dy = 2 + d * (BALATRO_CARD_H - 5) / (BALATRO_CARD_W - 5);
+            if (dy >= 2 && dy < BALATRO_CARD_H - 2) {
+                fb[(y + dy) * DS_SCREEN_W + (x + d)] = COLOR_MULT_RED;
+                fb[(y + dy) * DS_SCREEN_W + (x + (BALATRO_CARD_W - 1 - d))] = COLOR_MULT_RED;
+            }
+        }
+    }
+
+    // 5. Selected Highlight Border
     if (card->is_selected) {
         draw_outline_rect(fb, x - 1, y - 1, BALATRO_CARD_W + 2, BALATRO_CARD_H + 2, COLOR_CARD_SELECTED);
         draw_outline_rect(fb, x - 2, y - 2, BALATRO_CARD_W + 4, BALATRO_CARD_H + 4, COLOR_CARD_SELECTED);
@@ -685,13 +894,13 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
     // If Boss Blind, display boss name and debuff description!
     if (game->current_blind == BLIND_BOSS) {
         BossBlindInfo binfo = boss_blind_get_info(game->current_boss);
-        char boss_desc[48];
-        sprintf(boss_desc, "%s: %s", binfo.name, binfo.description);
-        draw_string(fb, 44, 66, boss_desc, COLOR_DIAMOND_ORANGE);
+        char boss_desc[128];
+        snprintf(boss_desc, sizeof(boss_desc), "%s: %s", binfo.name, binfo.description);
+        draw_string_clipped(fb, 44, 66, 96, boss_desc, COLOR_DIAMOND_ORANGE);
     } else {
         int reward_dollars = (game->current_blind == BLIND_SMALL) ? 3 : 4;
-        char rew_str[16];
-        sprintf(rew_str, "Reward: +$%d", reward_dollars);
+        char rew_str[32];
+        snprintf(rew_str, sizeof(rew_str), "Reward: +$%d", reward_dollars);
         draw_string(fb, 44, 66, rew_str, COLOR_RGB(16, 24, 18));
     }
 
@@ -800,16 +1009,16 @@ void renderer_draw_top_screen(uint16_t* fb, const GameSession* game) {
 
             // Display enhancement / edition / seal description
             if (sc->enhancement != ENHANCEMENT_NONE) {
-                char enh_line[64];
-                sprintf(enh_line, "[%s] %s", card_get_enhancement_name(sc->enhancement), card_get_enhancement_description(sc->enhancement));
+                char enh_line[128];
+                snprintf(enh_line, sizeof(enh_line), "[%s] %s", card_get_enhancement_name(sc->enhancement), card_get_enhancement_description(sc->enhancement));
                 draw_string_clipped(fb, 12, 156, 230, enh_line, COLOR_DIAMOND_ORANGE);
             } else if (sc->edition != EDITION_NONE) {
-                char ed_line[64];
-                sprintf(ed_line, "[%s] %s", card_get_edition_name(sc->edition), card_get_edition_description(sc->edition));
+                char ed_line[128];
+                snprintf(ed_line, sizeof(ed_line), "[%s] %s", card_get_edition_name(sc->edition), card_get_edition_description(sc->edition));
                 draw_string_clipped(fb, 12, 156, 230, ed_line, COLOR_CHIPS_BLUE);
             } else if (sc->seal != SEAL_NONE) {
-                char sl_line[64];
-                sprintf(sl_line, "[%s] %s", card_get_seal_name(sc->seal), card_get_seal_description(sc->seal));
+                char sl_line[128];
+                snprintf(sl_line, sizeof(sl_line), "[%s] %s", card_get_seal_name(sc->seal), card_get_seal_description(sc->seal));
                 draw_string_clipped(fb, 12, 156, 230, sl_line, COLOR_GOLD_COIN);
             } else {
                 draw_string(fb, 12, 156, "Standard unenhanced playing card.", COLOR_RGB(14, 20, 16));
@@ -1210,11 +1419,13 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
     }
 
     // 1. Top Controls Bar (Sort buttons, Consumable Slots, Use/Sell buttons)
-    draw_rounded_panel(fb, 4, 4, 54, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-    draw_string(fb, 10, 9, "SORT:RNK", COLOR_TEXT_WHITE);
+    bool rnk_active = (game->active_sort_mode == SORT_MODE_RANK);
+    draw_rounded_panel(fb, 4, 4, 54, 18, rnk_active ? COLOR_RGB(4, 20, 28) : COLOR_BOX_DARK, rnk_active ? COLOR_CHIPS_BLUE : COLOR_BOX_BORDER);
+    draw_string(fb, 10, 9, "SORT:RNK", rnk_active ? COLOR_GOLD_COIN : COLOR_TEXT_WHITE);
 
-    draw_rounded_panel(fb, 62, 4, 54, 18, COLOR_BOX_DARK, COLOR_BOX_BORDER);
-    draw_string(fb, 68, 9, "SORT:SUT", COLOR_TEXT_WHITE);
+    bool sut_active = (game->active_sort_mode == SORT_MODE_SUIT);
+    draw_rounded_panel(fb, 62, 4, 54, 18, sut_active ? COLOR_RGB(4, 20, 28) : COLOR_BOX_DARK, sut_active ? COLOR_CHIPS_BLUE : COLOR_BOX_BORDER);
+    draw_string(fb, 68, 9, "SORT:SUT", sut_active ? COLOR_GOLD_COIN : COLOR_TEXT_WHITE);
 
     // Consumable Slot 0 at (122, 2)
     draw_rounded_panel(fb, 122, 2, 28, 38, COLOR_BOX_DARK, (game->selected_consumable_slot == 0) ? COLOR_GOLD_COIN : COLOR_BOX_BORDER);
@@ -1241,9 +1452,14 @@ void renderer_draw_bottom_screen(uint16_t* fb, const GameSession* game) {
         Consumable* sc = (Consumable*)&game->consumables[sel_consumable];
         bool can_use = consumable_can_use(sc, sel_count);
 
-        // Info below sort buttons - show name and full description
-        draw_string(fb, 4, 25, sc->name, COLOR_GOLD_COIN);
-        draw_string_wrapped(fb, 4, 34, 114, sc->description, COLOR_TEXT_WHITE);
+        // Info below sort buttons (contained in y = 25..55 so it never overlaps cards at y = 60..114)
+        draw_string_clipped(fb, 4, 25, 114, sc->name, COLOR_GOLD_COIN);
+        draw_string_clipped(fb, 4, 35, 114, (sc->type == CONSUMABLE_TAROT ? "Tarot (Info on Top)" : "Planet (Info on Top)"), COLOR_TEXT_WHITE);
+        if (can_use) {
+            draw_string_clipped(fb, 4, 45, 114, "[READY TO USE]", COLOR_GOLD_COIN);
+        } else {
+            draw_string_clipped(fb, 4, 45, 114, "Need card selection", COLOR_DIAMOND_ORANGE);
+        }
 
         // [USE CARD] Button at (186, 2)
         uint16_t use_bg = can_use ? COLOR_RGB(4, 24, 8) : COLOR_RGB(8, 8, 8);

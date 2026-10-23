@@ -28,8 +28,15 @@ typedef enum {
     BLIND_BOSS
 } BlindType;
 
+typedef enum {
+    SORT_MODE_NONE = 0,
+    SORT_MODE_RANK,
+    SORT_MODE_SUIT
+} HandSortMode;
+
 typedef struct GameSession {
     GameStateType current_state;
+    HandSortMode active_sort_mode;
     int ante;
     BlindType current_blind;
     BossBlindId current_boss;
@@ -57,6 +64,7 @@ typedef struct GameSession {
 
     // Poker hand levels (1-indexed, HandType 1..12)
     int32_t hand_levels[13];
+    int32_t hand_play_counts[13];
 
     // Shop
     ShopState shop;

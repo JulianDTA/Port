@@ -46,6 +46,7 @@ static bool check_flush(const Card* cards[], int count) {
     if (count < 5) return false;
     CardSuit base = SUIT_NONE;
     for (int i = 0; i < count; ++i) {
+        if (cards[i]->enhancement == ENHANCEMENT_STONE) return false;
         if (cards[i]->enhancement == ENHANCEMENT_WILD) continue;
         if (base == SUIT_NONE) {
             base = cards[i]->suit;
@@ -58,6 +59,9 @@ static bool check_flush(const Card* cards[], int count) {
 
 static bool check_straight(const Card* sorted[], int count) {
     if (count < 5) return false;
+    for (int i = 0; i < count; ++i) {
+        if (sorted[i]->enhancement == ENHANCEMENT_STONE) return false;
+    }
     // Check standard descending consecutive ranks
     bool regular = true;
     for (int i = 0; i < count - 1; ++i) {
@@ -165,6 +169,22 @@ HandEvaluation poker_evaluate_played(const Card* cards[], int count, const int32
         eval.type = HAND_HIGH_CARD;
         // High card scores only the highest card
         if (count > 0) eval.scoring_cards[eval.scoring_count++] = sorted[0];
+    }
+
+    // Stone cards always score (+50 chips) alongside any played hand
+    for (int i = 0; i < count; ++i) {
+        if (sorted[i]->enhancement == ENHANCEMENT_STONE) {
+            bool already_present = false;
+            for (int s = 0; s < eval.scoring_count; ++s) {
+                if (eval.scoring_cards[s] == sorted[i]) {
+                    already_present = true;
+                    break;
+                }
+            }
+            if (!already_present && eval.scoring_count < MAX_PLAYED_CARDS) {
+                eval.scoring_cards[eval.scoring_count++] = sorted[i];
+            }
+        }
     }
 
     int32_t lvl = (hand_levels != NULL) ? hand_levels[eval.type] : 1;

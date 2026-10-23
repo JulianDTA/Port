@@ -19,6 +19,10 @@ static touchPosition s_touch;
 static uint16_t* s_top_fb = NULL;
 static uint16_t* s_sub_fb = NULL;
 
+// Off-screen double backbuffers in EWRAM to completely eliminate screen flickering and tearing
+static uint16_t s_top_backbuffer[DS_SCREEN_W * DS_SCREEN_H];
+static uint16_t s_sub_backbuffer[DS_SCREEN_W * DS_SCREEN_H];
+
 void hal_init(void) {
     powerOn(POWER_ALL_2D);
 
@@ -31,8 +35,19 @@ void hal_init(void) {
     int bgTop = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     int bgSub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
 
+    bgUpdate();
+
     s_top_fb = bgGetGfxPtr(bgTop);
     s_sub_fb = bgGetGfxPtr(bgSub);
+}
+
+void hal_present_frame(void) {
+    DC_FlushRange(s_top_backbuffer, sizeof(s_top_backbuffer));
+    DC_FlushRange(s_sub_backbuffer, sizeof(s_sub_backbuffer));
+    swiWaitForVBlank();
+    dmaCopyWords(3, s_top_backbuffer, s_top_fb, sizeof(s_top_backbuffer));
+    dmaCopyWords(3, s_sub_backbuffer, s_sub_fb, sizeof(s_sub_backbuffer));
+    bgUpdate();
 }
 
 void hal_update_input(PlatformInput* input) {
@@ -70,6 +85,7 @@ void hal_wait_vsync(void) {
 }
 #else
 void hal_init(void) {}
+void hal_present_frame(void) {}
 void hal_update_input(PlatformInput* input) { (void)input; }
 void hal_wait_vsync(void) {}
 #endif
@@ -90,9 +106,22 @@ int main(int argc, char* argv[]) {
     PlatformInput input;
     memset(&input, 0, sizeof(input));
 
-    bool need_redraw = true;
+    // Render initial frame immediately so both screens show content on boot without flashing
+#ifdef ARM9
+    if (s_top_fb && s_sub_fb) {
+        renderer_draw_top_screen(s_top_backbuffer, &game);
+        renderer_draw_bottom_screen(s_sub_backbuffer, &game);
+        hal_present_frame();
+    }
+#endif
 
+    bool need_redraw = false;
+
+#ifdef ARM9
+    while (pmMainLoop()) {
+#else
     while (1) {
+#endif
         hal_update_input(&input);
 
         // --- Active Scoring Animation State ---
@@ -156,12 +185,14 @@ int main(int argc, char* argv[]) {
                     else if (tx >= 2 && tx <= 58 && ty >= 2 && ty <= 24) {
                         for (int ci = 0; ci < game.deck.hand.count; ++ci) game.deck.hand.cards[ci].is_selected = false;
                         game.selected_consumable_slot = -1;
+                        game.active_sort_mode = SORT_MODE_RANK;
                         deck_sort_by_rank(&game.deck);
                         game_update_selection_preview(&game);
                         need_redraw = true;
                     } else if (tx >= 60 && tx <= 118 && ty >= 2 && ty <= 24) {
                         for (int ci = 0; ci < game.deck.hand.count; ++ci) game.deck.hand.cards[ci].is_selected = false;
                         game.selected_consumable_slot = -1;
+                        game.active_sort_mode = SORT_MODE_SUIT;
                         deck_sort_by_suit(&game.deck);
                         game_update_selection_preview(&game);
                         need_redraw = true;
@@ -435,6 +466,7 @@ int main(int argc, char* argv[]) {
             } else {
                 for (int ci = 0; ci < game.deck.hand.count; ++ci) game.deck.hand.cards[ci].is_selected = false;
                 game.selected_consumable_slot = -1;
+                game.active_sort_mode = SORT_MODE_RANK;
                 deck_sort_by_rank(&game.deck);
                 game_update_selection_preview(&game);
                 need_redraw = true;
@@ -452,6 +484,7 @@ int main(int argc, char* argv[]) {
             } else {
                 for (int ci = 0; ci < game.deck.hand.count; ++ci) game.deck.hand.cards[ci].is_selected = false;
                 game.selected_consumable_slot = -1;
+                game.active_sort_mode = SORT_MODE_SUIT;
                 deck_sort_by_suit(&game.deck);
                 game_update_selection_preview(&game);
                 need_redraw = true;
@@ -523,13 +556,16 @@ int main(int argc, char* argv[]) {
         // --- Render graphical screens ---
 #ifdef ARM9
         if (need_redraw && s_top_fb && s_sub_fb) {
-            renderer_draw_top_screen(s_top_fb, &game);
-            renderer_draw_bottom_screen(s_sub_fb, &game);
+            renderer_draw_top_screen(s_top_backbuffer, &game);
+            renderer_draw_bottom_screen(s_sub_backbuffer, &game);
+            hal_present_frame();
             need_redraw = false;
+        } else {
+            hal_wait_vsync();
         }
-#endif
-
+#else
         hal_wait_vsync();
+#endif
     }
 
     return 0;

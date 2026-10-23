@@ -77,12 +77,6 @@ void deck_discard_selected(DeckManager* dm) {
             if (dm->discard_pile.count < MAX_DECK_SIZE) {
                 dm->discard_pile.cards[dm->discard_pile.count++] = dm->hand.cards[i];
             }
-            // In-place replacement: draw directly into this exact slot if cards remain
-            if (dm->draw_pile.count > 0) {
-                Card replacement = dm->draw_pile.cards[--dm->draw_pile.count];
-                replacement.is_selected = false;
-                dm->hand.cards[write_idx++] = replacement;
-            }
         } else {
             if (write_idx != i) {
                 dm->hand.cards[write_idx] = dm->hand.cards[i];
@@ -104,12 +98,24 @@ void deck_remove_selected_from_hand(DeckManager* dm) {
             if (dm->discard_pile.count < MAX_DECK_SIZE) {
                 dm->discard_pile.cards[dm->discard_pile.count++] = dm->hand.cards[i];
             }
-            // In-place replacement: draw directly into this exact slot if cards remain
-            if (dm->draw_pile.count > 0) {
-                Card replacement = dm->draw_pile.cards[--dm->draw_pile.count];
-                replacement.is_selected = false;
-                dm->hand.cards[write_idx++] = replacement;
+        } else {
+            if (write_idx != i) {
+                dm->hand.cards[write_idx] = dm->hand.cards[i];
             }
+            write_idx++;
+        }
+    }
+    dm->hand.count = write_idx;
+}
+
+void deck_destroy_selected(DeckManager* dm) {
+    if (!dm) return;
+    int write_idx = 0;
+    int original_count = dm->hand.count;
+    for (int i = 0; i < original_count; ++i) {
+        if (dm->hand.cards[i].is_selected) {
+            dm->hand.cards[i].is_selected = false;
+            // Permanently destroyed: not sent to discard pile
         } else {
             if (write_idx != i) {
                 dm->hand.cards[write_idx] = dm->hand.cards[i];

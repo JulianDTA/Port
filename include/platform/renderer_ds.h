@@ -9,6 +9,9 @@
 #define DS_SCREEN_W 256
 #define DS_SCREEN_H 192
 
+#define BALATRO_CARD_W 28
+#define BALATRO_CARD_H 40
+
 // 15-bit BGR color macro with alpha bit set for DS VRAM bitmaps
 #define COLOR_RGB(r, g, b) ((((r) & 0x1F)) | (((g) & 0x1F) << 5) | (((b) & 0x1F) << 10) | 0x8000)
 

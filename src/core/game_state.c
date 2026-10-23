@@ -50,6 +50,7 @@ void game_session_init(GameSession* game) {
 
     for (int i = 0; i < 13; ++i) {
         game->hand_levels[i] = 1;
+        game->hand_play_counts[i] = 0;
     }
 }
 
@@ -68,6 +69,7 @@ void game_session_start_run(GameSession* game) {
 
     for (int i = 0; i < 13; ++i) {
         game->hand_levels[i] = 1;
+        game->hand_play_counts[i] = 0;
     }
 
     deck_init_standard(&game->deck);
@@ -107,6 +109,11 @@ void game_session_select_blind(GameSession* game, BlindType blind) {
     game->rng_state ^= game->rng_state << 5;
     deck_shuffle(&game->deck.draw_pile, game->rng_state);
     deck_draw_up_to_limit(&game->deck);
+    if (game->active_sort_mode == SORT_MODE_RANK) {
+        deck_sort_by_rank(&game->deck);
+    } else if (game->active_sort_mode == SORT_MODE_SUIT) {
+        deck_sort_by_suit(&game->deck);
+    }
 
     game->current_state = STATE_ROUND_ACTIVE;
 }
@@ -323,13 +330,41 @@ void game_finish_scoring(GameSession* game) {
             game->hand_levels[game->last_eval.type]--;
         }
     }
-    if (game->current_blind == BLIND_BOSS && game->current_boss == BOSS_THE_HOOK) {
-        if (game->deck.hand.count > 2) {
-            deck_draw_card(&game->deck);
+    // Boss effect: The Ox sets money to $0 if playing most played hand
+    if (game->current_blind == BLIND_BOSS && game->current_boss == BOSS_THE_OX) {
+        int most_played_type = 1;
+        int max_plays = game->hand_play_counts[1];
+        for (int h = 2; h <= 12; ++h) {
+            if (game->hand_play_counts[h] > max_plays) {
+                max_plays = game->hand_play_counts[h];
+                most_played_type = h;
+            }
         }
+        if (game->last_eval.type == most_played_type && max_plays > 0) {
+            game->dollars = 0;
+        }
+    }
+    if (game->last_eval.type >= 1 && game->last_eval.type <= 12) {
+        game->hand_play_counts[game->last_eval.type]++;
     }
 
     deck_remove_selected_from_hand(&game->deck);
+
+    // Boss effect: The Hook discards 2 random cards from remaining hand
+    if (game->current_blind == BLIND_BOSS && game->current_boss == BOSS_THE_HOOK) {
+        for (int d = 0; d < 2; ++d) {
+            if (game->deck.hand.count > 0) {
+                int r_idx = (int)(rand() % game->deck.hand.count);
+                if (game->deck.discard_pile.count < MAX_DECK_SIZE) {
+                    game->deck.discard_pile.cards[game->deck.discard_pile.count++] = game->deck.hand.cards[r_idx];
+                }
+                for (int m = r_idx; m < game->deck.hand.count - 1; ++m) {
+                    game->deck.hand.cards[m] = game->deck.hand.cards[m + 1];
+                }
+                game->deck.hand.count--;
+            }
+        }
+    }
     game->hands_left--;
 
     if (game->current_round_score >= game->target_score) {
@@ -347,6 +382,11 @@ void game_finish_scoring(GameSession* game) {
         game->current_state = STATE_GAME_OVER;
     } else {
         deck_draw_up_to_limit(&game->deck);
+        if (game->active_sort_mode == SORT_MODE_RANK) {
+            deck_sort_by_rank(&game->deck);
+        } else if (game->active_sort_mode == SORT_MODE_SUIT) {
+            deck_sort_by_suit(&game->deck);
+        }
         game->current_state = STATE_ROUND_ACTIVE;
     }
 
@@ -363,6 +403,11 @@ bool game_discard_selected_cards(GameSession* game) {
     deck_discard_selected(&game->deck);
     game->discards_left--;
     deck_draw_up_to_limit(&game->deck);
+    if (game->active_sort_mode == SORT_MODE_RANK) {
+        deck_sort_by_rank(&game->deck);
+    } else if (game->active_sort_mode == SORT_MODE_SUIT) {
+        deck_sort_by_suit(&game->deck);
+    }
 
     game_update_selection_preview(game);
     return true;
